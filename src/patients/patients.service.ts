@@ -35,8 +35,10 @@ export class PatientsService {
     let query = {};
     if (params.q) {
       const regex = new RegExp(params.q, 'i'); // 'i' makes it case-insensitive
+
       query = {
         $or: [
+          { patient_number: !isNaN(params.q) ? Number(params.q) : 0 },
           { first_name: { $regex: regex } },
           { last_name: { $regex: regex } },
           { email: { $regex: regex } },

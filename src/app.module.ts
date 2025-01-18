@@ -25,6 +25,7 @@ import { GalleryImagesModule } from './gallery-images/gallery-images.module';
 import { WebModule } from './web/web.module';
 import { OtpModule } from './otp/otp.module';
 import { AppConfigModule } from './app-config/app-config.module';
+import { BranchesModule } from './branches/branches.module';
 
 
 @Module({
@@ -50,7 +51,8 @@ import { AppConfigModule } from './app-config/app-config.module';
     GalleryImagesModule,
     WebModule,
     OtpModule,
-    AppConfigModule
+    AppConfigModule,
+    BranchesModule
   ],
   controllers: [AppController, UploadsController],
   providers: [AppService, PdfService, FileUploadService],

@@ -3,7 +3,9 @@ import {
   Controller,
   Get,
   NotFoundException,
+  Param,
   Post,
+  Query,
   Request,
   UseGuards,
 } from '@nestjs/common';
@@ -12,6 +14,8 @@ import { AuthGuard } from '@nestjs/passport';
 import { PatientsService } from 'src/patients/patients.service';
 import { OtpService } from 'src/otp/otp.service';
 import { SignUpDto } from 'src/patients/dto/signup.dto';
+import { UsersService } from 'src/users/users.service';
+import { User } from 'src/users/user.schema';
 
 @Controller('auth')
 export class AuthController {
@@ -19,6 +23,7 @@ export class AuthController {
     private authService: AuthService,
     private patientService: PatientsService,
     private otpService: OtpService,
+    private userService: UsersService,
   ) {}
 
   @Post('login')
@@ -85,5 +90,20 @@ export class AuthController {
       message: 'Registration Successfull please login',
       data: [],
     };
+  }
+
+  @Get('email/search')
+  async findBy(@Query() query: Record<string, any>): Promise<User[]> {
+    return this.userService.findBy(query);
+  }
+
+  @Get('forgot-password/:id')
+  async forgotPassword(@Param('id') id: string) {
+    return this.userService.forgotPasswordEmail(id);
+  }
+
+  @Post('reset-password/:id')
+  resetPassword(@Param('id') id: string, @Body() body: any) {
+    return this.userService.resetPassword(id, body);
   }
 }

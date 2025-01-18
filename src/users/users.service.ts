@@ -40,7 +40,7 @@ export class UsersService {
       };
     }
 
-    query = { ...query, role: 'staff' };
+    query = { ...query, role: { $nin: ['superadmin'] } };
 
     console.log(query);
     const users = await this.userModel

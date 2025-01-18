@@ -22,7 +22,7 @@ import { Response } from 'express';
 import { JwtAuthGuard } from 'src/auth/guards/jwt.guard';
 import { Request } from 'express';
 import { DoctorsService } from 'src/doctors/doctors.service';
-import { FilesInterceptor } from '@nestjs/platform-express';
+import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { FileUploadService } from 'src/services/file-upload/file-upload/file-upload.service';
 import { get } from 'http';
 import { UpdateAppointmentDto } from './dto/update-appointment.dto';
@@ -75,27 +75,17 @@ export class AppointmentsController {
   }
 
   @Post('upload-files/:id')
-  @UseInterceptors(FilesInterceptor('files'))
+  @UseInterceptors(FileInterceptor('file'))
   async uploadFiles(
     @Param('id') id: string,
     @Body() body,
-    @UploadedFiles() files: Express.Multer.File[],
+    @UploadedFile() file: Express.Multer.File,
   ) {
-    //  let data: any = [];
-    files.forEach((item) => {
-      this.appointmentsService.addFilesToAppointment(
-        id,
-        'appointment/' + item.filename,
-        'report',
-      );
-      //  data.push({ id, image: 'appointment/' + item.filename });
-    });
-
-    //  let file_name = body.file_name;
-    //  const filePaths = await this.fileUploadSevice.uploadFiles(files);
-    //  filePaths.forEach((item) => {
-    //  this.appointmentsService.addFilesToAppointment(id, item, file_name);
-    //  });
+    this.appointmentsService.addFilesToAppointment(
+      id,
+      'appointment/' + file.filename,
+      body.report_name,
+    );
 
     return {
       message: 'Files uploaded successfully',
@@ -132,5 +122,10 @@ export class AppointmentsController {
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.appointmentsService.remove(id);
+  }
+
+  @Patch('reports/:id')
+  removeReport(@Param('id') id: string, @Body() body: any) {
+    return this.appointmentsService.removeReport(id, body.image_id);
   }
 }

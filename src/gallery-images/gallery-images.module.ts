@@ -6,6 +6,7 @@ import { MulterModule } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { GalleryImage, GalleryImageSchema } from './gallery-image.schema';
 import { extname } from 'path';
+import * as fs from 'fs';
 
 @Module({
   controllers: [GalleryImagesController],
@@ -17,6 +18,10 @@ import { extname } from 'path';
       storage: diskStorage({
         destination: (req, file, cb) => {
           const uploadPath = process.env.UPLOAD_PATH + 'gallery/';
+
+          if (!fs.existsSync(uploadPath)) {
+            fs.mkdirSync(uploadPath, { recursive: true }); // Create parent directories if needed
+          }
           console.log(uploadPath);
           cb(null, uploadPath);
         },

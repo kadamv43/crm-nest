@@ -1,303 +1,173 @@
-<!DOCTYPE html>
-<html lang="en">
+<html lang='en'>
 
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset='UTF-8' />
+    <meta name='viewport' content='width=device-width, initial-scale=1.0' />
     <title>Patient Invoice</title>
     <style>
-        body {
-     font-family: 'Arial', sans-serif;
-     margin: 0;
-     padding: 0;
-     background-color: #f2f2f2;
-     color: #333;
- }
-
- .invoice-container {
-     max-width: 800px;
-     margin: 30px auto;
-     background-color: #fff;
-     padding: 20px;
-     border-radius: 8px;
-     box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
- }
-
- .header {
-     text-align: center;
-     margin-bottom: 30px;
- }
-
- .header img {
-     max-width: 200px;
-     margin-bottom: 10px;
- }
-
- .header h1 {
-     margin: 0;
-     font-size: 28px;
-     color: #2a7fd6;
- }
-
- .header p {
-     margin: 5px 0;
-     font-size: 14px;
-     color: #777;
- }
-
- .invoice-details {
-     display: flex;
-     justify-content: space-between;
-     margin-bottom: 30px;
- }
-
-
- .invoice-details .left {
-     text-align: left;
- }
-
- .invoice-details .right {
-     text-align: right;
- }
-
- .invoice-details p {
-     margin: 5px 0;
-     font-size: 14px;
- }
-
- .invoice-details .invoice-number,
- .invoice-details .date {
-     font-weight: bold;
- }
-
- .invoice-details .patient-info {
-     margin-top: 0px;
-     background-color: #f8f8f8;
-     padding: 5px;
-     border-radius: 8px;
- }
-
- table {
-     width: 100%;
-     border-collapse: collapse;
-     margin-bottom: 30px;
- }
-
- table,
- th,
- td {
-     border: 1px solid #ddd;
- }
-
- th,
- td {
-     padding: 12px;
-     text-align: center;
-     font-size: 14px;
- }
-
- th {
-     background-color: #f4f4f4;
- }
-
- .totals {
-     text-align: right;
-     margin-top: 20px;
- }
-
- .totals table {
-     width: auto;
-     margin-left: auto;
-     border: none;
- }
-
- .totals th,
- .totals td {
-     padding: 8px 20px;
-     border: none;
-     font-size: 14px;
- }
-
- .totals th {
-     text-align: left;
-     color: #555;
- }
-
- .totals td {
-     text-align: right;
- }
-
- .totals .total,
- .totals .paid,
- .totals .balance {
-     font-weight: bold;
-     color: #2a7fd6;
- }
-
- .signature {
-     margin-top: 50px;
-     display: flex;
-     justify-content: space-between;
- }
-
- .signature .received-by {
-     text-align: center;
-     margin-right: 40px;
- }
-
- .signature .received-by p {
-     margin: 5px 0;
-     font-size: 14px;
-     color: #777;
- }
-
- .signature .received-by .signature-line {
-     border-top: 1px solid #000;
-     width: 200px;
-     margin-top: 40px;
- }
-
- .footer {
-     text-align: center;
-     margin-top: 50px;
-     font-size: 12px;
-     color: #777;
- }
-
- .left img {
-     width: 65%;
- }
+      body { font-family: 'Arial', sans-serif; margin: 0; padding: 0;
+      background-color: #f2f2f2; color: #333; } .invoice-container { max-width:
+      800px; margin: 30px auto; background-color: #fff; padding: 20px;
+      border-radius: 8px; box-shadow: 0 0 10px rgba(0, 0, 0, 0.1); } .header {
+      text-align: center; margin-bottom: 30px; } .header img { max-width: 200px;
+      margin-bottom: 10px; } .header h1 { margin: 0; font-size: 28px; color:
+      #2a7fd6; } .header p { margin: 5px 0; font-size: 14px; color: #777; }
+      .invoice-details { display: flex; justify-content: space-between;
+      margin-bottom: 30px; } .invoice-details .left { text-align: left; }
+      .invoice-details .right { text-align: right; } .invoice-details p {
+      margin: 5px 0; font-size: 14px; } .invoice-details .invoice-number,
+      .invoice-details .date { font-weight: bold; } .invoice-details
+      .patient-info { margin-top: 0px; background-color: #f8f8f8; padding: 5px;
+      border-radius: 8px; } table { width: 100%; border-collapse: collapse;
+      margin-bottom: 30px; } table, th, td { border: 1px solid #ddd; } th, td {
+      padding: 12px; text-align: center; font-size: 14px; } th {
+      background-color: #f4f4f4; } .totals { text-align: right; margin-top:
+      20px; } .totals table { width: auto; margin-left: auto; border: none; }
+      .totals th, .totals td { padding: 8px 20px; border: none; font-size: 14px;
+      } .totals th { text-align: left; color: #555; } .totals td { text-align:
+      right; } .totals .total, .totals .paid, .totals .balance { font-weight:
+      bold; color: #2a7fd6; } .signature { margin-top: 50px; display: flex;
+      justify-content: space-between; } .signature .received-by { text-align:
+      center; margin-right: 40px; } .signature .received-by p { margin: 5px 0;
+      font-size: 14px; color: #777; } .signature .received-by .signature-line {
+      border-top: 1px solid #000; width: 200px; margin-top: 40px; } .footer {
+      text-align: center; margin-top: 50px; font-size: 12px; color: #777; }
+      .left img { width: 65%; }
     </style>
-</head>
+  </head>
 
-<body>
+  <body>
 
-<div id="invoice" class="invoice-container">
-    <div class="header">
+    <div id='invoice' class='invoice-container'>
+      <div class='header'>
         <h1>Invoice</h1>
-    </div>
+      </div>
 
-    <div class="invoice-details">
-        <div class="left">
-            <img src="/assets/logo.png" alt="Clinic Logo5"
-                crossorigin="*" />
+      <div class='invoice-details'>
+        <div class='left'>
+          <img src='/assets/logo.png' alt='Clinic Logo5' crossorigin='*' />
         </div>
-        <div class="right">
-            <p>Genomics infertility & test tube baby centre</p>
-            <p>
-                Thirumalai house 1st floor above dhanalakshmi bank, near Sion
-                fort, Sion East, Mumbai 400022
-            </p>
-            <!-- <p>Phone: (123) 456-7890 | Email: info@clinic.com</p> -->
+        <div class='right'>
+          <p>Genomics infertility & test tube baby centre</p>
+          <p>
+            Thirumalai house 1st floor above dhanalakshmi bank, near Sion fort,
+            Sion East, Mumbai 400022
+          </p>
+          <!-- <p>Phone: (123) 456-7890 | Email: info@clinic.com</p> -->
         </div>
-    </div>
+      </div>
 
-    <div class="invoice-details">
-        <div class="left">
-            <p class="date">Date: {{formatDate created_at 'dd-MM-yyyy'}} </p>
-            <p class="invoice-number">Invoice No : {{invoice_number}}</p>
+      <div class='invoice-details'>
+        <div class='left'>
+          <p class='date'>Date: {{formatDate created_at 'dd-MM-yyyy'}} </p>
+          <p class='invoice-number'>Invoice No : {{invoice_number}}</p>
+          <p class='invoice-number'>OPD No:{{patient.patient_number}}</p>
         </div>
-        <div class="right">
-            <div class="patient-info">
-                <p><strong>Patient Name:</strong> {{patient.first_name}}
-                    {{patient.last_name}}</p>
-                <p><strong>Doctor Name:</strong> {{doctor.first_name}}
-                    {{doctor.last_name}}</p>
-            </div>
-            <!-- <p><strong>Payment Method:</strong>{{payment_mode}}</p>
+        <div class='right'>
+          <div class='patient-info'>
+            <p><strong>Patient Name:</strong>
+              {{patient.first_name}}
+              {{patient.last_name}}</p>
+            <p><strong>Doctor Name:</strong>
+              {{doctor.first_name}}
+              {{doctor.last_name}}</p>
+          </div>
+          <!-- <p><strong>Payment Method:</strong>{{payment_mode}}</p>
             <p><strong>Payment Status:</strong> Paid</p> -->
         </div>
-    </div>
+      </div>
 
-    <table>
+      <table>
         <thead>
-            <tr>
-                <th>Sr. No</th>
-                <th>Particulars</th>
-                <th>Amount</th>
-            </tr>
+          <tr>
+            <th>Sr. No</th>
+            <th>Particulars</th>
+            <th>Amount</th>
+          </tr>
         </thead>
         <tbody>
 
-        {{#each particulars}}
+          {{#each particulars}}
             <tr>
-                <td>{{incrementIndex @index}}</td>
-                <td>{{name }}</td>
-                <td>&#8377;{{ price }}</td>
+              <td>{{incrementIndex @index}}</td>
+              <td>{{name}}</td>
+              <td>&#8377;{{price}}</td>
             </tr>
-        {{/each}}
+          {{/each}}
 
         </tbody>
-    </table>
+      </table>
 
-    <div class="totals">
+      <div class='totals'>
         <table>
-            <tbody>
-                <tr>
-                    <th>Total:</th>
-                    <td class="total">&#8377;{{total_amount}}</td>
-                </tr>
-                <tr>
-                    <th>Discount:</th>
-                    <td class="paid">&#8377;{{discount}}</td>
-                </tr>
-                <tr>
-                    <th>Paid:</th>
-                    <td class="paid">&#8377;{{paid}}</td>
-                </tr>
-                <tr>
-                    <th>Balance:</th>
-                    <td class="balance">&#8377;{{balance}}</td>
-                </tr>
+          <tbody>
+            <tr>
+              <th>Total:</th>
+              <td class='total'>&#8377;{{total_amount}}</td>
+            </tr>
+            <tr>
+              <th>Discount:</th>
+              <td class='paid'>&#8377;{{discount}}</td>
+            </tr>
+            <tr>
+              <th>Paid:</th>
+              <td class='paid'>&#8377;{{paid}}</td>
+            </tr>
+            <tr>
+              <th>Balance:</th>
+              <td class='balance'>&#8377;{{balance}}</td>
+            </tr>
 
-                {{#if partial_payment}}
+            {{#if partial_payment}}
 
-                <tr >
-                    <th>Payment 1:</th>
-                    <td class="balance">&#8377;{{payment_mode1.price}} ({{payment_mode1.mode}})</td>
-                </tr>
-                <tr >
-                    <th>Payment 2:</th>
-                    <td class="balance">&#8377;{{payment_mode2.price}} ({{payment_mode2.mode}})</td>
-                </tr>
+              <tr>
+                <th>Payment 1:</th>
+                <td class='balance'>&#8377;{{payment_mode1.price}}
+                  ({{payment_mode1.mode}})</td>
+              </tr>
+              <tr>
+                <th>Payment 2:</th>
+                <td class='balance'>&#8377;{{payment_mode2.price}}
+                  ({{payment_mode2.mode}})</td>
+              </tr>
 
-                {{else}}
-                    {{#if payment_mode}}
-                    <tr>
-                        <th>Payment Method:</th>
-                        <td class="balance">{{payment_mode}}</td>
-                    </tr>
-                    {{else}}
-                    <tr>
-                        <th>Payment Method:</th>
-                        <td class="balance">{{payment_mode1.mode}}</td>
-                    </tr>
-                    {{/if}}
-                {{/if}}
-
+            {{else}}
+              {{#if payment_mode}}
                 <tr>
-                    <th>Payment status:</th>
-                    <td class="balance">Paid</td>
+                  <th>Payment Method:</th>
+                  <td class='balance'>{{payment_mode}}</td>
                 </tr>
-            </tbody>
+              {{else}}
+                <tr>
+                  <th>Payment Method:</th>
+                  <td class='balance'>{{payment_mode1.mode}}</td>
+                </tr>
+              {{/if}}
+            {{/if}}
+
+            <tr>
+              <th>Payment status:</th>
+              <td class='balance'>Paid</td>
+            </tr>
+          </tbody>
         </table>
-    </div>
+      </div>
 
-    <div class="signature">
-        <div class="received-by">
-            <p>Received by:</p>
-            {{received_by}}
-            <div class="signature-line"></div>
+      <div class='signature'>
+        <div class='received-by'>
+          <p>Received by:</p>
+          {{received_by}}
+          <div class='signature-line'></div>
         </div>
-    </div>
+      </div>
 
-    <div class="footer">
+      <div class='footer'>
         <p>
-            Thank you for choosing our clinic. If you have any questions
-            regarding this invoice, please contact us at (123) 456-7890.
+          Thank you for choosing our clinic. If you have any questions regarding
+          this invoice, please contact us at +91 8928841738.
         </p>
+      </div>
     </div>
-</div>
-</body>
+  </body>
 
 </html>

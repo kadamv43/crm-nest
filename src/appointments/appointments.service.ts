@@ -138,12 +138,13 @@ export class AppointmentsService {
     file_name: string,
   ): Promise<Appointment> {
     let file_type = file.endsWith('.pdf') ? 'pdf' : 'image';
+    const timestamp = Math.floor(Date.now() / 1000);
 
     return this.appointmentModel
       .findByIdAndUpdate(
         id,
         {
-          $addToSet: { files: { file_name, file, file_type } },
+          $addToSet: { files: { id: timestamp, file_name, file, file_type } },
         },
         { new: true }, // Returns the updated document
       )
@@ -152,6 +153,26 @@ export class AppointmentsService {
 
   async remove(id: string): Promise<Appointment> {
     return this.appointmentModel.findByIdAndDelete(id).exec();
+  }
+
+  async removeReport(id: string, image_id: number): Promise<Appointment> {
+    console.log('app', id);
+    console.log('img', image_id);
+    let appointment = await this.appointmentModel.findById(id).exec();
+    let files = appointment.files.filter((item: any) => {
+      return item.id != image_id;
+    });
+
+    console.log('files', files);
+    return this.appointmentModel
+      .findByIdAndUpdate(
+        id,
+        {
+          files,
+        },
+        { new: true }, // Returns the updated document
+      )
+      .exec();
   }
 
   async generateUniqueAppointmentNumber(): Promise<string> {
