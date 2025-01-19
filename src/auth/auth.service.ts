@@ -13,8 +13,8 @@ export class AuthService {
     private patientService: PatientsService,
   ) {}
 
-  async validateUser(email: string, password: string) {
-    const user = await this.usersService.findByField({ email });
+  async validateUser(username: string, password: string) {
+    const user = await this.usersService.findByField({ username });
     if (user && (await bcrypt.compare(password, user.password))) {
       return user;
     }
@@ -32,11 +32,12 @@ export class AuthService {
   async loginUser(user: any) {
     const payload = {
       sub: user._id,
-      first_name:user.first_name,
-      last_name:user.last_name,
-      email:user.email,
-      role:user.role,
-      mobile:user.mobile
+      first_name: user.first_name,
+      last_name: user.last_name,
+      username: user.username,
+      email: user.email,
+      role: user.role,
+      mobile: user.mobile,
     };
     return {
       accessToken: this.jwtService.sign(payload),
@@ -46,7 +47,7 @@ export class AuthService {
   async loginPatient(patient: any) {
     let plainPatient = patient.toObject();
     let data = { ...plainPatient, sub: plainPatient._id };
-    console.log(data)
+    console.log(data);
     return {
       accessToken: this.jwtService.sign(data),
     };

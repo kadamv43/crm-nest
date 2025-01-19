@@ -40,11 +40,23 @@ export class UsersService {
       };
     }
 
-    query = { ...query, role: { $nin: ['superadmin'] } };
+    if (params.role) {
+      query = {
+        ...query,
+        $and: [{ role: params.role }, { role: { $nin: ['superadmin'] } }],
+      };
+    } else {
+      query = {
+        ...query,
+        role: { $nin: ['superadmin'] },
+      };
+    }
 
+    console.log(params);
     console.log(query);
     const users = await this.userModel
       .find(query)
+      .populate('branch')
       .skip(skip)
       .limit(size)
       .exec();
@@ -54,7 +66,7 @@ export class UsersService {
   }
 
   async findOne(id: string): Promise<User> {
-    const user = await this.userModel.findById(id).exec();
+    const user = await this.userModel.findById(id).populate('branch').exec();
     if (!user) {
       throw new NotFoundException(`User with ID ${id} not found`);
     }
@@ -62,7 +74,10 @@ export class UsersService {
   }
 
   async findByField(queryData): Promise<User> {
-    const user = await this.userModel.findOne(queryData).exec();
+    const user = await this.userModel
+      .findOne(queryData)
+      .populate('branch')
+      .exec();
     return user;
   }
 
@@ -111,7 +126,7 @@ export class UsersService {
     }
 
     const to = updatedUser.email;
-    const subject = 'Genomics Forgot password email';
+    const subject = 'Forgot password email';
     const text = 'Your code for reset password is ' + randomString;
     await this.emailService.sendMail(to, subject, text);
 
@@ -145,7 +160,7 @@ export class UsersService {
   }
 
   async findBy(query: Record<string, any>): Promise<User[]> {
-    return this.userModel.find(query).exec();
+    return this.userModel.find(query).populate('branch').exec();
   }
 
   async generateRandomString(length: number) {

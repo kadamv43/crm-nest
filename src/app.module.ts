@@ -26,7 +26,9 @@ import { WebModule } from './web/web.module';
 import { OtpModule } from './otp/otp.module';
 import { AppConfigModule } from './app-config/app-config.module';
 import { BranchesModule } from './branches/branches.module';
-
+import { BanksModule } from './banks/banks.module';
+import { UpisModule } from './upis/upis.module';
+import { PaymentLinksModule } from './payment-links/payment-links.module';
 
 @Module({
   imports: [
@@ -52,7 +54,10 @@ import { BranchesModule } from './branches/branches.module';
     WebModule,
     OtpModule,
     AppConfigModule,
-    BranchesModule
+    BranchesModule,
+    BanksModule,
+    UpisModule,
+    PaymentLinksModule,
   ],
   controllers: [AppController, UploadsController],
   providers: [AppService, PdfService, FileUploadService],

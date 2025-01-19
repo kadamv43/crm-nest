@@ -1,7 +1,8 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document } from 'mongoose';
+import { Document, Schema as MongooseSchema } from 'mongoose';
 import * as bcrypt from 'bcrypt';
 import { Role } from 'src/auth/roles.enum';
+import { Branch } from 'src/branches/branch.schema';
 
 export type UserDocument = User & Document;
 
@@ -27,6 +28,9 @@ export class User {
 
   @Prop({ required: false })
   target: number;
+
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Branch', required: true })
+  branch: Branch;
 
   @Prop({ required: false })
   otp: string;
