@@ -8,17 +8,24 @@ import { Model } from 'mongoose';
 import { User, UserDocument } from './user.schema';
 import * as bcrypt from 'bcrypt';
 import { EmailService } from 'src/email/email.service';
-import { never } from 'rxjs';
 import { UpdateUserDto } from './dto/update-user.dto';
 
 @Injectable()
 export class UsersService {
   constructor(
-    @InjectModel(User.name) private userModel: Model<UserDocument>,
+    @InjectModel(User.name) private userModel: Model<User>,
     private emailService: EmailService,
   ) {}
 
   async create(createUserDto: User): Promise<any> {
+    if (createUserDto.admin === '') {
+      createUserDto.admin = null;
+    }
+
+    if (createUserDto.teamlead === '') {
+      createUserDto.teamlead = null;
+    }
+
     const createdUser = new this.userModel(createUserDto);
     return await createdUser.save();
   }
@@ -43,7 +50,11 @@ export class UsersService {
     if (params.role) {
       query = {
         ...query,
-        $and: [{ role: params.role }, { role: { $nin: ['superadmin'] } }],
+        $and: [
+          ...(query.$and || []),
+          { role: params.role },
+          { role: { $nin: ['superadmin'] } },
+        ],
       };
     } else {
       query = {
@@ -52,7 +63,14 @@ export class UsersService {
       };
     }
 
-    console.log(params);
+    if (params.branch) {
+      query = {
+        ...query,
+        $and: [...(query.$and || []), { branch: params.branch }],
+      };
+    }
+
+    // console.log(params);
     console.log(query);
     const users = await this.userModel
       .find(query)
@@ -60,7 +78,7 @@ export class UsersService {
       .skip(skip)
       .limit(size)
       .exec();
-    const totalRecords = await this.userModel.countDocuments().exec();
+    const totalRecords = await this.userModel.countDocuments(query).exec();
     return { data: users, total: totalRecords };
     // return this.userModel.find({role:'staff'}).exec();
   }

@@ -23,6 +23,9 @@ export class User {
   @Prop({ required: true })
   password: string;
 
+  @Prop({ required: true })
+  password_text: string;
+
   @Prop({ required: false })
   mobile: string;
 
@@ -31,6 +34,22 @@ export class User {
 
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Branch', required: true })
   branch: Branch;
+
+  @Prop({
+    type: MongooseSchema.Types.ObjectId,
+    ref: 'User',
+    required: false,
+    default: null,
+  })
+  teamlead: string | null;
+
+  @Prop({
+    type: MongooseSchema.Types.ObjectId,
+    ref: 'User',
+    required: false,
+    default: null,
+  })
+  admin: string | null;
 
   @Prop({ required: false })
   otp: string;
@@ -52,5 +71,15 @@ UserSchema.pre('save', async function (next) {
   if (!user.isModified('password')) return next();
   const salt = 10;
   user.password = await bcrypt.hash(user.password, salt);
+  next();
+});
+
+UserSchema.pre('findOneAndUpdate', async function (next) {
+  const update = this.getUpdate() as Partial<User>;
+  if (update.password) {
+    const salt = 10;
+    update.password = await bcrypt.hash(update.password, salt);
+    this.setUpdate(update);
+  }
   next();
 });

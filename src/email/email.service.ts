@@ -7,13 +7,13 @@ export class EmailService {
 
   constructor() {
     this.transporter = nodemailer.createTransport({
-      name: 'mail.advisory.in',
-      host: 'mail.advisory.in', // or another email service provider
-      port: 587,
-      secure: false,
+      name: process.env.MAIL_SERVER,
+      host: process.env.MAIL_SERVER, // or another email service provider
+      port: 465,
+      secure: true,
       debug: true,
       auth: {
-        user: 'info@advisory.in', // Your email address
+        user: process.env.SENDER_EMAIL, // Your email address
         pass: '~~[kvte%(mNI', // Your email password
       },
     });
@@ -21,7 +21,7 @@ export class EmailService {
 
   async sendMail(to: string, subject: string, text: string): Promise<void> {
     const mailOptions: nodemailer.SendMailOptions = {
-      from: 'info@advisory.in',
+      from: process.env.SENDER_EMAIL,
       to,
       subject,
       text,

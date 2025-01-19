@@ -43,14 +43,14 @@ export class UsersController {
     return this.usersService.findBy(query);
   }
 
-  @Patch('update-note')
-  @UseGuards(AuthGuard('jwt'))
-  updateNote(@Request() req, @Body() body: any) {
-    console.log(req.user);
-    const { note } = body;
-    return this.usersService.updateNote(req.user.userId, { note: note });
-    // return JSON.stringify(req.user);
-  }
+  // @Patch('update-note')
+  // @UseGuards(AuthGuard('jwt'))
+  // updateNote(@Request() req, @Body() body: any) {
+  //   console.log(req.user);
+  //   const { note } = body;
+  //   return this.usersService.updateNote(req.user.userId, { note: note });
+  //   // return JSON.stringify(req.user);
+  // }
 
   @Get('user-details')
   @UseGuards(AuthGuard('jwt'))

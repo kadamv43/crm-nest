@@ -1,49 +1,39 @@
 import { Type } from 'class-transformer';
-import {
-  IsString,
-  IsNotEmpty,
-  IsEmail,
-  IsPhoneNumber,
-  IsOptional,
-  Min,
-  IsNumber,
-  IsBoolean,
-  IsDate,
-} from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsDate } from 'class-validator';
 import { Role } from 'src/auth/roles.enum';
 import { Branch } from 'src/branches/branch.schema';
 
-export class UpdateUserDto {
+export class CreateUserDto {
   @IsString()
-  @IsOptional()
+  @IsNotEmpty()
   first_name: string;
 
   @IsString()
-  @IsOptional()
+  @IsNotEmpty()
   last_name: string;
 
   @IsString()
-  @IsOptional()
+  @IsNotEmpty()
   email: string;
 
   @IsString()
-  @IsOptional()
+  @IsNotEmpty()
   username: string;
 
   @IsString()
-  @IsOptional()
+  @IsNotEmpty()
   password: string;
 
   @IsString()
-  @IsOptional()
+  @IsNotEmpty()
   password_text: string;
 
   @IsString()
-  @IsOptional()
+  @IsNotEmpty()
   mobile: string;
 
   @IsString()
-  @IsOptional()
+  @IsNotEmpty()
   target: number;
 
   @IsString()
@@ -63,7 +53,7 @@ export class UpdateUserDto {
   admin: string;
 
   @IsString()
-  @IsOptional()
+  @IsNotEmpty()
   role: Role;
 
   @IsOptional()
