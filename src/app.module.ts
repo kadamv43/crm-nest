@@ -29,6 +29,8 @@ import { BranchesModule } from './branches/branches.module';
 import { BanksModule } from './banks/banks.module';
 import { UpisModule } from './upis/upis.module';
 import { PaymentLinksModule } from './payment-links/payment-links.module';
+import { HotLeadsModule } from './hot-leads/hot-leads.module';
+import { LeadsModule } from './leads/leads.module';
 
 @Module({
   imports: [
@@ -58,6 +60,8 @@ import { PaymentLinksModule } from './payment-links/payment-links.module';
     BanksModule,
     UpisModule,
     PaymentLinksModule,
+    HotLeadsModule,
+    LeadsModule,
   ],
   controllers: [AppController, UploadsController],
   providers: [AppService, PdfService, FileUploadService],
