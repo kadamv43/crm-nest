@@ -31,6 +31,7 @@ import { UpisModule } from './upis/upis.module';
 import { PaymentLinksModule } from './payment-links/payment-links.module';
 import { HotLeadsModule } from './hot-leads/hot-leads.module';
 import { LeadsModule } from './leads/leads.module';
+import { UserLeadsModule } from './user-leads/user-leads.module';
 
 @Module({
   imports: [
@@ -62,6 +63,7 @@ import { LeadsModule } from './leads/leads.module';
     PaymentLinksModule,
     HotLeadsModule,
     LeadsModule,
+    UserLeadsModule,
   ],
   controllers: [AppController, UploadsController],
   providers: [AppService, PdfService, FileUploadService],

@@ -11,6 +11,12 @@ export class Branch {
   @Prop({ required: true, trim: true })
   address: string;
 
+  @Prop({ required: true, trim: true })
+  max_users: number;
+
+  @Prop({ required: true, default: Date.now })
+  expiry_date: Date;
+
   @Prop({ default: Date.now })
   created_at: Date;
 

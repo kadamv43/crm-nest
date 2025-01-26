@@ -1,9 +1,9 @@
 import { Type } from 'class-transformer';
-import { IsString, IsOptional, IsDate } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsDate } from 'class-validator';
 
-export class UpdateHotLeadDto {
+export class CreateUserLeadDto {
   @IsString()
-  @IsOptional()
+  @IsNotEmpty()
   mobile: string;
 
   @IsString()
@@ -13,10 +13,6 @@ export class UpdateHotLeadDto {
   @IsString()
   @IsOptional()
   city: string;
-
-  @IsString()
-  @IsOptional()
-  investment: string;
 
   @IsOptional()
   @IsDate()

@@ -14,6 +14,10 @@ export class CreateHotLeadDto {
   @IsOptional()
   city: string;
 
+  @IsString()
+  @IsOptional()
+  investment: string;
+
   @IsOptional()
   @IsDate()
   @Type(() => Date)

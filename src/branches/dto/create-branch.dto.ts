@@ -1,5 +1,11 @@
 import { Type } from 'class-transformer';
-import { IsString, IsNotEmpty, IsOptional, IsDate } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsOptional,
+  IsDate,
+  IsNumber,
+} from 'class-validator';
 
 export class CreateBranchDto {
   @IsString()
@@ -9,6 +15,15 @@ export class CreateBranchDto {
   @IsString()
   @IsNotEmpty()
   address: string;
+
+  @IsNumber()
+  @IsNotEmpty()
+  max_users: number;
+
+  @IsNotEmpty()
+  @IsDate()
+  @Type(() => Date)
+  expiry_date: Date = new Date();
 
   @IsOptional()
   @IsDate()

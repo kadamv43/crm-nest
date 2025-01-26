@@ -2,18 +2,17 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { HotLead } from './hot-lead.schema';
-import { UpdateHotLeadDto } from './dto/update-hot-lead.dto';
-import { CreateHotLeadDto } from './dto/create-hot-lead.dto';
+import { UserLead } from './user-lead.schema';
+import { CreateUserLeadDto } from './dto/create-user-lead.dto';
+import { UpdateUserLeadDto } from './dto/update-user-lead.dto';
 
 @Injectable()
-export class HotLeadsService {
-  prefix = 'PATIENT-';
+export class UserLeadsService {
   constructor(
-    @InjectModel(HotLead.name) private readonly model: Model<HotLead>,
+    @InjectModel(UserLead.name) private readonly model: Model<UserLead>,
   ) {}
 
-  async create(createDto: CreateHotLeadDto): Promise<HotLead> {
+  async create(createDto: CreateUserLeadDto): Promise<UserLead> {
     const { mobile } = createDto;
     const existingPatient = await this.model.findOne({ mobile }).exec();
 
@@ -53,7 +52,7 @@ export class HotLeadsService {
     return { data: patients, total: totalRecords };
   }
 
-  async getById(id: string): Promise<HotLead> {
+  async getById(id: string): Promise<UserLead> {
     const patient = await this.model.findById(id).exec();
     if (!patient) {
       throw new NotFoundException(`Patient #${id} not found`);
@@ -61,18 +60,18 @@ export class HotLeadsService {
     return patient;
   }
 
-  async findBy(query: Record<string, any>): Promise<HotLead[]> {
+  async findBy(query: Record<string, any>): Promise<UserLead[]> {
     return this.model.find(query).exec();
   }
 
-  async findByOne(query: Record<string, any>): Promise<HotLead> {
+  async findByOne(query: Record<string, any>): Promise<UserLead> {
     return this.model.findOne(query).exec();
   }
 
   async update(
     id: string,
-    updatePatientDto: UpdateHotLeadDto,
-  ): Promise<HotLead> {
+    updatePatientDto: UpdateUserLeadDto,
+  ): Promise<UserLead> {
     const existingPatient = await this.model
       .findByIdAndUpdate(id, updatePatientDto, { new: true })
       .exec();
@@ -91,7 +90,7 @@ export class HotLeadsService {
     }
   }
 
-  async remove(id: string): Promise<HotLead> {
+  async remove(id: string): Promise<UserLead> {
     const deletedPatient = await this.model.findByIdAndDelete(id).exec();
     if (!deletedPatient) {
       throw new NotFoundException(`Patient #${id} not found`);
@@ -99,7 +98,7 @@ export class HotLeadsService {
     return deletedPatient;
   }
 
-  async globalSearch(query: string): Promise<HotLead[]> {
+  async globalSearch(query: string): Promise<UserLead[]> {
     const searchRegex = new RegExp(query, 'i'); // 'i' makes it case insensitive
     return this.model
       .find({
@@ -120,7 +119,6 @@ export class HotLeadsService {
         mobile: data['mobile'],
         name: data['name'],
         city: data['city'],
-        investment: data['investment'],
       });
       await item.save();
     }

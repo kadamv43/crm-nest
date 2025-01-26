@@ -20,6 +20,15 @@ export class UpdateBranchDto {
   @IsOptional()
   address?: string;
 
+  @IsNumber()
+  @IsOptional()
+  max_users: number;
+
+  @IsOptional()
+  @IsDate()
+  @Type(() => Date)
+  expiry_date: Date = new Date();
+
   @IsOptional()
   @IsDate()
   @Type(() => Date)

@@ -1,7 +1,7 @@
 import { Type } from 'class-transformer';
 import { IsString, IsOptional, IsDate } from 'class-validator';
 
-export class UpdateHotLeadDto {
+export class UpdateUserLeadDto {
   @IsString()
   @IsOptional()
   mobile: string;
@@ -13,10 +13,6 @@ export class UpdateHotLeadDto {
   @IsString()
   @IsOptional()
   city: string;
-
-  @IsString()
-  @IsOptional()
-  investment: string;
 
   @IsOptional()
   @IsDate()
