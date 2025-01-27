@@ -7,10 +7,11 @@ import {
   Param,
   Delete,
   UseGuards,
-  Request,
   Query,
+  Req,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
+import { Request } from 'express';
 import { User } from './user.schema';
 import { RolesGuard } from 'src/auth/guards/roles.guard';
 import { Roles } from 'src/auth/roles.decorator';
@@ -29,12 +30,20 @@ export class UsersController {
 
   @Post()
   // @Roles(Role.Admin)
-  create(@Body() createUserDto: User) {
+  create(@Body() createUserDto: User, @Req() req: Request) {
+    console.log(req.user);
+    if (req.user['role'] == 'admin') {
+      createUserDto.branch = req.user['branch']['_id'];
+    }
     return this.usersService.create(createUserDto);
   }
 
   @Get('/')
-  findAll(@Query() query: Record<string, any>) {
+  findAll(@Query() query: Record<string, any>, @Req() req: Request) {
+    if (req.user['role'] == 'admin') {
+      query.branch = req.user['branch']['_id'];
+    }
+    query.IsSuperAdmin = req.user['role'] == 'superadmin';
     return this.usersService.findAll(query);
   }
 
@@ -54,8 +63,8 @@ export class UsersController {
 
   @Get('user-details')
   @UseGuards(AuthGuard('jwt'))
-  getUserDetails(@Request() req) {
-    return this.usersService.findOne(req.user.userId);
+  getUserDetails(@Req() req: Request) {
+    return this.usersService.findOne(req.user['userId']);
     // return JSON.stringify(req.user);
   }
 

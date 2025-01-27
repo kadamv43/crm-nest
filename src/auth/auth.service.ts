@@ -4,6 +4,7 @@ import { JwtService } from '@nestjs/jwt';
 import { UsersService } from 'src/users/users.service';
 import { PatientsService } from 'src/patients/patients.service';
 import * as bcrypt from 'bcrypt';
+import { Branch } from 'src/branches/branch.schema';
 
 @Injectable()
 export class AuthService {
@@ -38,6 +39,7 @@ export class AuthService {
       email: user.email,
       role: user.role,
       mobile: user.mobile,
+      branch: user.branch,
     };
     return {
       accessToken: this.jwtService.sign(payload),

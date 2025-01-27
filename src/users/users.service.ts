@@ -53,13 +53,21 @@ export class UsersService {
         $and: [
           ...(query.$and || []),
           { role: params.role },
-          { role: { $nin: ['superadmin'] } },
+          {
+            role: {
+              $nin: params.isSuperadmin
+                ? ['superadmin']
+                : ['superadmin', 'admin'],
+            },
+          },
         ],
       };
     } else {
       query = {
         ...query,
-        role: { $nin: ['superadmin'] },
+        role: {
+          $nin: params.isSuperadmin ? ['superadmin'] : ['superadmin', 'admin'],
+        },
       };
     }
 
