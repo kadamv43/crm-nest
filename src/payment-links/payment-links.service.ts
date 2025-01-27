@@ -30,6 +30,14 @@ export class PaymentLinksService {
         ],
       };
     }
+
+    if (params.branch) {
+      query = {
+        ...query,
+        $and: [{ branch: params.branch }],
+      };
+    }
+
     const items = await this.model
       .find(query)
       .populate('branch')
