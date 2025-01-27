@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsString, IsOptional, IsDate } from 'class-validator';
+import { IsString, IsOptional, IsDate, IsNotEmpty } from 'class-validator';
 
 export class UpdateMonthlyIncentiveDto {
   @IsString()
@@ -9,6 +9,10 @@ export class UpdateMonthlyIncentiveDto {
   @IsString()
   @IsOptional()
   incentive: string;
+
+  @IsString()
+  @IsNotEmpty()
+  branch: string;
 
   @IsOptional()
   @IsDate()

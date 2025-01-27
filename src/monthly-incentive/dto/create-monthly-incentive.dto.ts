@@ -10,6 +10,10 @@ export class CreateMonthlyIncentiveDto {
   @IsNotEmpty()
   incentive: string;
 
+  @IsString()
+  @IsNotEmpty()
+  branch: string;
+
   @IsOptional()
   @IsDate()
   @Type(() => Date)

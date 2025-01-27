@@ -4,7 +4,7 @@ import { MonthlyIncentiveService } from './monthly-incentive.service';
 import {
   MonthlyIncentiveSchema,
   MonthlyIncentive,
-} from './monthly-incentiveschema';
+} from './monthly-incentive.schema';
 import { MongooseModule } from '@nestjs/mongoose';
 
 @Module({

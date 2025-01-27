@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { SpotIncentive } from './spot-incentiveschema';
+import { SpotIncentive } from './spot-incentive.schema';
 import { UpdateSpotIncentiveDto } from './dto/update-spot-incentive.dto';
 
 @Injectable()
@@ -30,8 +30,16 @@ export class SpotIncentiveService {
         ],
       };
     }
+
+    if (params.branch) {
+      query = {
+        ...query,
+        $and: [{ branch: params.branch }],
+      };
+    }
+
     const items = await this.model.find(query).skip(skip).limit(size).exec();
-    const totalRecords = await this.model.countDocuments().exec();
+    const totalRecords = await this.model.countDocuments(query).exec();
     return { data: items, total: totalRecords };
   }
 

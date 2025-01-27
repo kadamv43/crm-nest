@@ -10,6 +10,10 @@ export class UpdateSpotIncentiveDto {
   @IsOptional()
   incentive: string;
 
+  @IsString()
+  @IsOptional()
+  branch: string;
+
   @IsOptional()
   @IsDate()
   @Type(() => Date)

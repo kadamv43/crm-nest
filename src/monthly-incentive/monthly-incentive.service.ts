@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { MonthlyIncentive } from './monthly-incentiveschema';
+import { MonthlyIncentive } from './monthly-incentive.schema';
 import { Model } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
 import { UpdateMonthlyIncentiveDto } from './dto/update-monthly-incentive.dto';
@@ -31,8 +31,16 @@ export class MonthlyIncentiveService {
         ],
       };
     }
+
+    if (params.branch) {
+      query = {
+        ...query,
+        $and: [{ branch: params.branch }],
+      };
+    }
+
     const items = await this.model.find(query).skip(skip).limit(size).exec();
-    const totalRecords = await this.model.countDocuments().exec();
+    const totalRecords = await this.model.countDocuments(query).exec();
     return { data: items, total: totalRecords };
   }
 
