@@ -32,6 +32,8 @@ import { PaymentLinksModule } from './payment-links/payment-links.module';
 import { HotLeadsModule } from './hot-leads/hot-leads.module';
 import { LeadsModule } from './leads/leads.module';
 import { UserLeadsModule } from './user-leads/user-leads.module';
+import { SpotIncentiveModule } from './spot-incentive/spot-incentive.module';
+import { MonthlyIncentiveModule } from './monthly-incentive/monthly-incentive.module';
 
 @Module({
   imports: [
@@ -64,6 +66,8 @@ import { UserLeadsModule } from './user-leads/user-leads.module';
     HotLeadsModule,
     LeadsModule,
     UserLeadsModule,
+    SpotIncentiveModule,
+    MonthlyIncentiveModule,
   ],
   controllers: [AppController, UploadsController],
   providers: [AppService, PdfService, FileUploadService],
