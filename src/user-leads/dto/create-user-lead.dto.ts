@@ -12,7 +12,19 @@ export class CreateUserLeadDto {
 
   @IsString()
   @IsOptional()
-  city: string;
+  assigned_by: string;
+
+  @IsString()
+  @IsNotEmpty()
+  user: string;
+
+  @IsString()
+  @IsNotEmpty()
+  branch: string;
+
+  @IsString()
+  @IsNotEmpty()
+  status: string;
 
   @IsOptional()
   @IsDate()

@@ -11,15 +11,15 @@ export class LeadsService {
   prefix = 'PATIENT-';
   constructor(@InjectModel(Lead.name) private readonly model: Model<Lead>) {}
 
-  async create(createDto: CreateLeadDto): Promise<Lead> {
-    const { mobile } = createDto;
-    const existingPatient = await this.model.findOne({ mobile }).exec();
+  async create(createDto: CreateLeadDto[]) {
+    // const { mobile } = createDto;
+    // const existingPatient = await this.model.findOne({ mobile }).exec();
 
-    if (existingPatient) {
-      return existingPatient;
-    }
-    const createdPatient = new this.model(createDto);
-    return createdPatient.save();
+    // if (existingPatient) {
+    //   return existingPatient;
+    // }
+    return await this.model.insertMany(createDto);
+    // const createdPatient = new this.model(createDto);
   }
 
   async findAll(params) {

@@ -25,7 +25,14 @@ export class LeadsController {
 
   @Post()
   async createBranch(@Body() body) {
-    return this.service.create(body);
+    const { mobile } = body;
+    const mobileArray = mobile.split('\n');
+    const data = mobileArray.map((item) => {
+      return {
+        mobile: item,
+      };
+    });
+    return this.service.create(data);
   }
 
   @Get()

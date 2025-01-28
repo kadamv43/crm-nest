@@ -10,7 +10,9 @@ import {
   Post,
   Put,
   Query,
+  Req,
   UploadedFile,
+  UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 
@@ -18,14 +20,27 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import * as XLSX from 'xlsx';
 import { UserLeadsService } from './user-leads.service';
 import { UpdateUserLeadDto } from './dto/update-user-lead.dto';
+import { Request } from 'express';
+import { JwtAuthGuard } from 'src/auth/guards/jwt.guard';
 
+@UseGuards(JwtAuthGuard)
 @Controller('user-leads')
 export class UserLeadsController {
   constructor(private readonly service: UserLeadsService) {}
 
   @Post()
-  async createBranch(@Body() body) {
-    return this.service.create(body);
+  async createBranch(@Body() body, @Req() req: Request) {
+    const { mobile, user } = body;
+    const mobileArray = mobile.split('\n');
+    const data = mobileArray.map((item) => {
+      return {
+        mobile: item,
+        user,
+        assigned_by: req.user['username'],
+        branch: req.user['branch']['_id'],
+      };
+    });
+    return this.service.create(data);
   }
 
   @Get()
@@ -33,9 +48,24 @@ export class UserLeadsController {
     return this.service.findAll(query);
   }
 
+  @Get('my-leads')
+  async getMyLeads(@Req() req: Request, @Query() query: Record<string, any>) {
+    console.log(req.user);
+    console.log(query);
+    return this.service.getByUserId(req?.user['userId'], query);
+  }
+
   @Get(':id')
   async getBlogById(@Param('id') id: string) {
     return this.service.getById(id);
+  }
+
+  @Get('user/:id')
+  async getUserLeads(
+    @Param('id') id: string,
+    @Query() query: Record<string, any>,
+  ) {
+    return this.service.getByUserId(id, query);
   }
 
   @Put(':id')

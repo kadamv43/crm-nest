@@ -12,15 +12,15 @@ export class UserLeadsService {
     @InjectModel(UserLead.name) private readonly model: Model<UserLead>,
   ) {}
 
-  async create(createDto: CreateUserLeadDto): Promise<UserLead> {
-    const { mobile } = createDto;
-    const existingPatient = await this.model.findOne({ mobile }).exec();
+  async create(createDto: CreateUserLeadDto[]) {
+    // const { mobile } = createDto;
+    // const existingPatient = await this.model.findOne({ mobile }).exec();
 
-    if (existingPatient) {
-      return existingPatient;
-    }
-    const createdPatient = new this.model(createDto);
-    return createdPatient.save();
+    // if (existingPatient) {
+    //   return existingPatient;
+    // }
+    return await this.model.insertMany(createDto);
+    // return createdPatient.save();
   }
 
   async findAll(params) {
@@ -58,6 +58,29 @@ export class UserLeadsService {
       throw new NotFoundException(`Patient #${id} not found`);
     }
     return patient;
+  }
+
+  async getByUserId(id: string, params) {
+    const size = params.size;
+    const skip = params.page * params.size;
+
+    let query = {};
+
+    query = { user: id };
+    if (params.status) {
+      query = {
+        $and: [{ status: params.status }],
+      };
+    }
+
+    const patients = await this.model
+      .find(query)
+      .sort({ patient_number: 'desc' })
+      .skip(skip)
+      .limit(size)
+      .exec();
+    const totalRecords = await this.model.countDocuments(query).exec();
+    return { data: patients, total: totalRecords };
   }
 
   async findBy(query: Record<string, any>): Promise<UserLead[]> {

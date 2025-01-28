@@ -47,26 +47,25 @@ export class UsersService {
       };
     }
 
+    console.log(params);
     if (params.role) {
+      const excludeRoles = params.IsSuperAdmin
+        ? ['superadmin']
+        : ['superadmin', 'admin'];
+      console.log(excludeRoles);
       query = {
         ...query,
         $and: [
           ...(query.$and || []),
           { role: params.role },
-          {
-            role: {
-              $nin: params.isSuperadmin
-                ? ['superadmin']
-                : ['superadmin', 'admin'],
-            },
-          },
+          { role: { $nin: excludeRoles } },
         ],
       };
     } else {
       query = {
         ...query,
         role: {
-          $nin: params.isSuperadmin ? ['superadmin'] : ['superadmin', 'admin'],
+          $nin: params.IsSuperAdmin ? ['superadmin'] : ['superadmin', 'admin'],
         },
       };
     }

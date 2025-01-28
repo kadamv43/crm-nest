@@ -12,7 +12,19 @@ export class UpdateUserLeadDto {
 
   @IsString()
   @IsOptional()
-  city: string;
+  assigned_by: string;
+
+  @IsString()
+  @IsOptional()
+  user: string;
+
+  @IsString()
+  @IsOptional()
+  branch: string;
+
+  @IsString()
+  @IsOptional()
+  status: string;
 
   @IsOptional()
   @IsDate()
