@@ -1,5 +1,11 @@
 import { Type } from 'class-transformer';
-import { IsString, IsNotEmpty, IsOptional, IsDate } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsOptional,
+  IsDate,
+  isObject,
+} from 'class-validator';
 
 export class CreateUserLeadDto {
   @IsString()
@@ -25,6 +31,15 @@ export class CreateUserLeadDto {
   @IsString()
   @IsNotEmpty()
   status: string;
+
+  @IsOptional()
+  free_trial: any;
+
+  @IsOptional()
+  follow_up: any;
+
+  @IsOptional()
+  payment: any;
 
   @IsOptional()
   @IsDate()

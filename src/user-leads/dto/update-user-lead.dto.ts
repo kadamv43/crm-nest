@@ -27,6 +27,15 @@ export class UpdateUserLeadDto {
   status: string;
 
   @IsOptional()
+  free_trial: any;
+
+  @IsOptional()
+  follow_up: any;
+
+  @IsOptional()
+  payment: any;
+
+  @IsOptional()
   @IsDate()
   @Type(() => Date)
   created_at?: Date = new Date();
