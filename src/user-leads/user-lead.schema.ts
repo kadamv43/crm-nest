@@ -68,6 +68,24 @@ export class UserLead {
     required: false,
     _id: false,
     properties: {
+      name: { type: String, trim: true },
+      mobile: { type: String, trim: true },
+      city: { type: String, trim: true },
+      callback_date: { type: Date },
+    },
+  })
+  callback: {
+    callback_date: Date;
+    name: string;
+    mobile: string;
+    city: string;
+  };
+
+  @Prop({
+    type: Object,
+    required: false,
+    _id: false,
+    properties: {
       payment_amount: { type: String, trim: true },
       payment_details: { type: Object, trim: true },
       payment_mode: { type: String, trim: true },

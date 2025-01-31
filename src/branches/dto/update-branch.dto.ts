@@ -24,6 +24,10 @@ export class UpdateBranchDto {
   @IsOptional()
   max_users: number;
 
+  @IsString()
+  @IsOptional()
+  status: string;
+
   @IsOptional()
   @IsDate()
   @Type(() => Date)

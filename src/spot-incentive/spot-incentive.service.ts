@@ -38,6 +38,13 @@ export class SpotIncentiveService {
       };
     }
 
+    if (params.role) {
+      query = {
+        ...query,
+        $and: [{ role: params.role }],
+      };
+    }
+
     const items = await this.model.find(query).skip(skip).limit(size).exec();
     const totalRecords = await this.model.countDocuments(query).exec();
     return { data: items, total: totalRecords };

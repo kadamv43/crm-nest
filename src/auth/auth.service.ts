@@ -1,10 +1,15 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { AuthPayloadDto } from './dto/auth.dto';
 import { JwtService } from '@nestjs/jwt';
 import { UsersService } from 'src/users/users.service';
 import { PatientsService } from 'src/patients/patients.service';
 import * as bcrypt from 'bcrypt';
 import { Branch } from 'src/branches/branch.schema';
+import { Role } from './roles.enum';
 
 @Injectable()
 export class AuthService {
@@ -41,9 +46,30 @@ export class AuthService {
       mobile: user.mobile,
       branch: user.branch,
     };
+
+    if (user.role !== 'superadmin') {
+      const isExpired = await this.checkAccountExpiry(payload.branch);
+
+      if (payload.branch.status == 'Inactive') {
+        throw new ForbiddenException('Your account is Inactive');
+      }
+      if (isExpired === 'expired') {
+        throw new ForbiddenException('Your account is expired');
+      }
+    }
+
     return {
       accessToken: this.jwtService.sign(payload),
     };
+  }
+
+  async checkAccountExpiry(branch: any): Promise<string> {
+    if (!branch || !branch.expiry_date) {
+      throw new Error('Branch or expiry date is missing');
+    }
+
+    const expiryDate = new Date(branch.expiry_date); // Ensure correct date parsing
+    return expiryDate < new Date() ? 'expired' : 'success';
   }
 
   async loginPatient(patient: any) {

@@ -14,6 +14,9 @@ export class Branch {
   @Prop({ required: true, trim: true })
   max_users: number;
 
+  @Prop({ required: true, trim: true, default: 'Active' })
+  status: string;
+
   @Prop({ required: true, default: Date.now })
   expiry_date: Date;
 

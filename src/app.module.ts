@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { MongooseModule } from '@nestjs/mongoose';
@@ -34,6 +34,7 @@ import { LeadsModule } from './leads/leads.module';
 import { UserLeadsModule } from './user-leads/user-leads.module';
 import { SpotIncentiveModule } from './spot-incentive/spot-incentive.module';
 import { MonthlyIncentiveModule } from './monthly-incentive/monthly-incentive.module';
+import { CheckAccountExpiryMiddleware } from './check-account-expiry.middleware';
 
 @Module({
   imports: [

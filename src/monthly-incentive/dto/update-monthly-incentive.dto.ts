@@ -11,6 +11,10 @@ export class UpdateMonthlyIncentiveDto {
   incentive: string;
 
   @IsString()
+  @IsOptional()
+  role: string;
+
+  @IsString()
   @IsNotEmpty()
   branch: string;
 

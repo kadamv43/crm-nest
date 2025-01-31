@@ -1,4 +1,5 @@
 import {
+  ForbiddenException,
   Injectable,
   NotFoundException,
   UnauthorizedException,
@@ -17,17 +18,25 @@ export class UsersService {
     private emailService: EmailService,
   ) {}
 
-  async create(createUserDto: User): Promise<any> {
-    if (createUserDto.admin === '') {
-      createUserDto.admin = null;
-    }
+  async create(createUserDto: User, req): Promise<any> {
+    createUserDto.admin = createUserDto.admin || null;
+    createUserDto.teamlead = createUserDto.teamlead || null;
 
-    if (createUserDto.teamlead === '') {
-      createUserDto.teamlead = null;
+    if (req.user?.role === 'admin') {
+      await this.checkUserAddLimit(req); // Ensure user limit before assignment
+      createUserDto.branch = req.user?.branch?._id;
     }
 
     const createdUser = new this.userModel(createUserDto);
     return await createdUser.save();
+  }
+
+  async checkUserAddLimit(req): Promise<void> {
+    const users = await this.findBy({ branch: req.user?.branch?._id });
+
+    if (users.length >= req.user?.branch?.max_users) {
+      throw new ForbiddenException('You have reached your maximum user limit');
+    }
   }
 
   async findAll(params) {

@@ -9,6 +9,8 @@ import {
   UseGuards,
   Query,
   Req,
+  UnauthorizedException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { Request } from 'express';
@@ -30,12 +32,8 @@ export class UsersController {
 
   @Post()
   // @Roles(Role.Admin)
-  create(@Body() createUserDto: User, @Req() req: Request) {
-    console.log(req.user);
-    if (req.user['role'] == 'admin') {
-      createUserDto.branch = req.user['branch']['_id'];
-    }
-    return this.usersService.create(createUserDto);
+  async create(@Body() createUserDto: User, @Req() req: Request) {
+    return this.usersService.create(createUserDto, req);
   }
 
   @Get('/')

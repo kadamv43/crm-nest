@@ -12,6 +12,9 @@ export class MonthlyIncentive {
   @Prop({ required: true, trim: true })
   incentive: string;
 
+  @Prop({ required: true, trim: true })
+  role: string;
+
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Branch', required: true })
   branch: Branch;
 

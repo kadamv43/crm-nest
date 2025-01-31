@@ -36,6 +36,9 @@ export class CreateUserLeadDto {
   free_trial: any;
 
   @IsOptional()
+  callback: any;
+
+  @IsOptional()
   follow_up: any;
 
   @IsOptional()

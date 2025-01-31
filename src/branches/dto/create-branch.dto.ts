@@ -16,6 +16,10 @@ export class CreateBranchDto {
   @IsNotEmpty()
   address: string;
 
+  @IsString()
+  @IsNotEmpty()
+  status: string;
+
   @IsNumber()
   @IsNotEmpty()
   max_users: number;

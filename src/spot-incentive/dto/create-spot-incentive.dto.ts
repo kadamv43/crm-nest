@@ -12,6 +12,10 @@ export class CreateSpotIncentiveDto {
 
   @IsString()
   @IsNotEmpty()
+  role: string;
+
+  @IsString()
+  @IsNotEmpty()
   branch: string;
 
   @IsOptional()

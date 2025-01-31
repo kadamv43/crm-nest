@@ -12,6 +12,10 @@ export class UpdateSpotIncentiveDto {
 
   @IsString()
   @IsOptional()
+  role: string;
+
+  @IsString()
+  @IsOptional()
   branch: string;
 
   @IsOptional()

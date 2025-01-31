@@ -22,6 +22,9 @@ export class UpdateUserLeadDto {
   @IsOptional()
   branch: string;
 
+  @IsOptional()
+  callback: any;
+
   @IsString()
   @IsOptional()
   status: string;
