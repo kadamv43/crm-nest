@@ -76,7 +76,6 @@ export class AuthController {
   @Get('details')
   @UseGuards(AuthGuard('jwt'))
   status(@Request() req) {
-    console.log(req.user);
     return JSON.stringify(req.user);
   }
 

@@ -60,7 +60,6 @@ export class BlogController {
     @Body() updateDoctorDto: UpdateBlogDto,
     @UploadedFile() file: Express.Multer.File,
   ) {
-    console.log(updateDoctorDto);
     if (file) {
       updateDoctorDto.image = 'blogs/' + file.filename;
     }

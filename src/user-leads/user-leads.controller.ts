@@ -29,12 +29,29 @@ export class UserLeadsController {
   constructor(private readonly service: UserLeadsService) {}
 
   @Post()
-  async createBranch(@Body() body, @Req() req: Request) {
+  async create(@Body() body, @Req() req: Request) {
     const { mobile, user } = body;
     const mobileArray = mobile.split('\n');
     const data = mobileArray.map((item) => {
       return {
         mobile: item,
+        user,
+        assigned_by: req.user['username'],
+        branch: req.user['branch']['_id'],
+      };
+    });
+    return this.service.create(data);
+  }
+
+  @Post('bulk')
+  async createBulk(@Body() body, @Req() req: Request) {
+    const { leads, user } = body;
+
+    const data = leads.map((item) => {
+      return {
+        mobile: item?.mobile,
+        name: item?.name,
+        city: item?.city,
         user,
         assigned_by: req.user['username'],
         branch: req.user['branch']['_id'],

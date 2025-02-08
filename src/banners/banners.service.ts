@@ -25,7 +25,6 @@ export class BannersService {
     if (params.status) {
       query = { status: params.status };
     }
-    console.log(params);
     const blogs = await this.blogModel
       .find(query)
       .skip(skip)

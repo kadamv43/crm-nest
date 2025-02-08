@@ -7,7 +7,6 @@ export class CheckAccountExpiryMiddleware implements NestMiddleware {
     if (req.user['branch']['expiry_date'] < new Date()) {
       throw new ForbiddenException('Your Account is Expired');
     }
-    console.log();
     next(); // Pass request to the next middleware or controller
   }
 }

@@ -10,15 +10,13 @@ export class AppConfigService {
   ) {}
 
   async findAll() {
-    console.log('here');
     return await this.AppConfigModel.find().exec();
   }
 
   async createConfig() {
-    console.log('here');
     return await this.AppConfigModel.create({
       discount_limit: 2000,
-      invoice_generate_otp:true
+      invoice_generate_otp: true,
     });
   }
 }

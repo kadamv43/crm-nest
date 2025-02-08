@@ -25,7 +25,7 @@ export class WebController {
     private patientService: PatientsService,
     private appointmentService: AppointmentsService,
     private otpService: OtpService,
-    private invoiceService:InvoiceService
+    private invoiceService: InvoiceService,
   ) {}
 
   @Post('appointment')
@@ -107,8 +107,7 @@ export class WebController {
   @Get('invoice/:id')
   @Render('invoice') // Render the 'page' template
   async getPageById(@Param('id') id: string): Promise<any> {
-    const invoice = await this.invoiceService.findOne(id)
-    console.log(invoice)
-    return invoice
+    const invoice = await this.invoiceService.findOne(id);
+    return invoice;
   }
 }

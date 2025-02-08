@@ -1,16 +1,17 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
+import { UpdateDayOfferDto } from './dto/update-day-offer.dto';
+import { DayOffer } from './day-offer.schema';
 import { Model } from 'mongoose';
-import { SpotIncentive } from './spot-incentive.schema';
-import { UpdateSpotIncentiveDto } from './dto/update-spot-incentive.dto';
+import { InjectModel } from '@nestjs/mongoose';
 
 @Injectable()
-export class SpotIncentiveService {
+export class DayOfferService {
   constructor(
-    @InjectModel('SpotIncentive') private readonly model: Model<SpotIncentive>,
+    @InjectModel('DayOffer')
+    private readonly model: Model<DayOffer>,
   ) {}
 
-  async create(data): Promise<SpotIncentive> {
+  async create(data): Promise<DayOffer> {
     const item = new this.model(data);
     return item.save();
   }
@@ -50,16 +51,16 @@ export class SpotIncentiveService {
     return { data: items, total: totalRecords };
   }
 
-  async getById(id: string): Promise<SpotIncentive> {
+  async getById(id: string): Promise<DayOffer> {
     return this.model.findById(id).exec();
   }
 
   async update(
     id: string,
-    updateSpotIncentiveDto: UpdateSpotIncentiveDto,
-  ): Promise<SpotIncentive> {
+    updateMonthlyIncentiveDto: UpdateDayOfferDto,
+  ): Promise<DayOffer> {
     const itemUpdate = await this.model
-      .findByIdAndUpdate(id, updateSpotIncentiveDto, {
+      .findByIdAndUpdate(id, updateMonthlyIncentiveDto, {
         new: true,
       })
       .exec();
@@ -74,28 +75,5 @@ export class SpotIncentiveService {
     if (!result) {
       throw new NotFoundException(`Bank with ID ${id} not found`);
     }
-  }
-
-  async getUserIncentive(business: number, role: string) {
-    const result = await this.model
-      .find({
-        role: role,
-      })
-      .sort({ business: 1 }); // Sort by business in ascending order
-
-    console.log('ui', result);
-
-    // Find the closest lower bound business bracket
-    let closestBracket = null;
-    for (const entry of result) {
-      const bracketBusiness = parseInt(entry.business);
-      if (bracketBusiness <= business) {
-        closestBracket = entry;
-      } else {
-        break; // Stop once we pass the business range
-      }
-    }
-
-    return closestBracket ? closestBracket.incentive : 0; // Return incentive or 0 if no match
   }
 }

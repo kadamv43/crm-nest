@@ -10,6 +10,7 @@ import { UserLead, UserLeadSchema } from './user-lead.schema';
       { name: UserLead.name, schema: UserLeadSchema },
     ]),
   ],
+  exports: [UserLeadsService, MongooseModule],
   providers: [UserLeadsService],
   controllers: [UserLeadsController],
 })

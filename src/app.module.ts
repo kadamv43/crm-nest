@@ -35,6 +35,9 @@ import { UserLeadsModule } from './user-leads/user-leads.module';
 import { SpotIncentiveModule } from './spot-incentive/spot-incentive.module';
 import { MonthlyIncentiveModule } from './monthly-incentive/monthly-incentive.module';
 import { CheckAccountExpiryMiddleware } from './check-account-expiry.middleware';
+import { DayOfferModule } from './day-offer/day-offer.module';
+import { DashboardModule } from './dashboard/dashboard.module';
+import { IncentiveModule } from './incentive/incentive.module';
 
 @Module({
   imports: [
@@ -69,6 +72,9 @@ import { CheckAccountExpiryMiddleware } from './check-account-expiry.middleware'
     UserLeadsModule,
     SpotIncentiveModule,
     MonthlyIncentiveModule,
+    DayOfferModule,
+    DashboardModule,
+    IncentiveModule,
   ],
   controllers: [AppController, UploadsController],
   providers: [AppService, PdfService, FileUploadService],

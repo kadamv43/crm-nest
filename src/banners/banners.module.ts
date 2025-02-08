@@ -15,13 +15,12 @@ import { extname } from 'path';
       storage: diskStorage({
         destination: (req, file, cb) => {
           const uploadPath = process.env.UPLOAD_PATH + 'banners/';
-          console.log(uploadPath)
           cb(null, uploadPath);
         },
         filename: (req, file, callback) => {
-           const fileExt = extname(file.originalname);
-           const fileName = `${Date.now()}-${Math.round(Math.random() * 1e9)}${fileExt}`;
-           callback(null, fileName);
+          const fileExt = extname(file.originalname);
+          const fileName = `${Date.now()}-${Math.round(Math.random() * 1e9)}${fileExt}`;
+          callback(null, fileName);
         },
       }),
     }),

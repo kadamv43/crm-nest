@@ -75,7 +75,6 @@ export class AuthService {
   async loginPatient(patient: any) {
     let plainPatient = patient.toObject();
     let data = { ...plainPatient, sub: plainPatient._id };
-    console.log(data);
     return {
       accessToken: this.jwtService.sign(data),
     };

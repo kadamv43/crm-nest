@@ -10,6 +10,7 @@ import { MongooseModule } from '@nestjs/mongoose';
       { name: SpotIncentive.name, schema: SpotIncentiveSchema },
     ]),
   ],
+  exports: [SpotIncentiveService, MongooseModule],
   providers: [SpotIncentiveService],
   controllers: [SpotIncentiveController],
 })

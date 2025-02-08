@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Branch } from './branch.schema';
 import { UpdateBlogDto } from 'src/blog/dto/update-blog.dto';
+import { UpdateBranchDto } from './dto/update-branch.dto';
 
 @Injectable()
 export class BranchesService {
@@ -10,7 +11,7 @@ export class BranchesService {
     @InjectModel('Branch') private readonly branchModel: Model<Branch>,
   ) {}
 
-  async createBranch(data): Promise<Branch> {
+  async create(data): Promise<Branch> {
     const newBlog = new this.branchModel(data);
     return newBlog.save();
   }
@@ -39,13 +40,13 @@ export class BranchesService {
     return { data: blogs, total: totalRecords };
   }
 
-  async getBranchById(blogId: string): Promise<Branch> {
+  async getById(blogId: string): Promise<Branch> {
     return this.branchModel.findById(blogId).exec();
   }
 
-  async update(id: string, updateBlogDto: UpdateBlogDto): Promise<Branch> {
+  async update(id: string, updateDto: UpdateBranchDto): Promise<Branch> {
     const updatedBlog = await this.branchModel
-      .findByIdAndUpdate(id, updateBlogDto, {
+      .findByIdAndUpdate(id, updateDto, {
         new: true,
       })
       .exec();

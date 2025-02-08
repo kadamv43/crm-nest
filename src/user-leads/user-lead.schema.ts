@@ -89,7 +89,7 @@ export class UserLead {
       payment_amount: { type: String, trim: true },
       payment_details: { type: Object, trim: true },
       payment_mode: { type: String, trim: true },
-      expected_payment_date: { type: Date },
+      payment_date: { type: Date },
     },
   })
   payment: {

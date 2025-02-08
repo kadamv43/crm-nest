@@ -14,6 +14,9 @@ export class Branch {
   @Prop({ required: true, trim: true })
   max_users: number;
 
+  @Prop({ required: false, trim: true })
+  spot_incentive_base_business: number;
+
   @Prop({ required: true, trim: true, default: 'Active' })
   status: string;
 

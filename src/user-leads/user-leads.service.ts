@@ -1,10 +1,13 @@
 // src/patients/patients.service.ts
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { model, Model, Types } from 'mongoose';
 import { UserLead } from './user-lead.schema';
 import { CreateUserLeadDto } from './dto/create-user-lead.dto';
 import { UpdateUserLeadDto } from './dto/update-user-lead.dto';
+import { ObjectId } from 'mongoose';
+import { types } from 'util';
+import { iif } from 'rxjs';
 
 @Injectable()
 export class UserLeadsService {
@@ -60,6 +63,386 @@ export class UserLeadsService {
     return patient;
   }
 
+  async getFreeTrialData(params) {
+    let query = {};
+    let matchStage = {};
+
+    matchStage['status'] = 'FREE_TRIAL';
+
+    if (params.users) {
+      matchStage['user'] = Array.isArray(params.users)
+        ? { $in: params.users.map((id) => new Types.ObjectId(id)) }
+        : new Types.ObjectId(params.users);
+    }
+
+    const today = new Date();
+    const startOfDay = new Date(today.setUTCHours(0, 0, 0, 0));
+    const endOfDay = new Date(today.setUTCHours(23, 59, 59, 999));
+
+    // Add date filter for free_trial_date
+    query['free_trial.free_trial_date'] = { $gte: startOfDay, $lte: endOfDay };
+
+    const freeTrials = await this.model
+      .find(query)
+      .populate('user')
+      .sort({ created_at: 'desc' })
+      .exec();
+
+    const totalRecords = await this.model.countDocuments(query).exec();
+    return { data: freeTrials, total: totalRecords };
+  }
+
+  async getPaymentsDoneData(params) {
+    let query = {};
+
+    query['status'] = 'PAYMENT_DONE';
+
+    if (params.user) {
+      query = {
+        ...query,
+        $and: [{ branch: new Types.ObjectId(params.user) }],
+      };
+    }
+
+    if (params.branch) {
+      query = {
+        ...query,
+        $and: [{ branch: params.branch }],
+      };
+    }
+
+    const paymentsDone = await this.model
+      .find(query)
+      .populate('user')
+      .sort({ created_at: 'desc' })
+      .exec();
+
+    const totalRecords = await this.model.countDocuments(query).exec();
+    return { data: paymentsDone, total: totalRecords };
+  }
+
+  async getTodaysPaymentsDoneData(params) {
+    let query: any = { status: 'PAYMENT_DONE' };
+
+    if (params.user) {
+      query['user'] = new Types.ObjectId(params.user);
+    }
+
+    if (params.branch) {
+      query['branch'] = new Types.ObjectId(params.branch);
+    }
+
+    const now = new Date();
+    const startOfDay = new Date(
+      Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate(),
+        0,
+        0,
+        0,
+        0,
+      ),
+    );
+    const endOfDay = new Date(
+      Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate(),
+        23,
+        59,
+        59,
+        999,
+      ),
+    );
+
+    console.log('Start of Day:', startOfDay);
+    console.log('End of Day:', endOfDay);
+
+    query['payment.payment_date'] = { $gte: startOfDay, $lte: endOfDay };
+
+    console.log('query', query);
+
+    const paymentsDone = await this.model.aggregate([
+      { $match: query }, // Filter by status, user, branch, and date
+      {
+        $group: {
+          _id: null,
+          totalAmount: {
+            $sum: { $toDouble: '$payment.payment_amount' }, // Convert and sum amount
+          },
+          data: { $push: '$$ROOT' }, // Store full records
+        },
+      },
+    ]);
+
+    // Get correct total count
+    const totalRecords = paymentsDone.length ? paymentsDone[0].data.length : 0;
+
+    return {
+      data: paymentsDone.length ? paymentsDone[0].data : [],
+      total: totalRecords,
+      totalAmount: paymentsDone.length ? paymentsDone[0].totalAmount : 0,
+    };
+  }
+
+  async getTodaysExpectedPayment(params) {
+    let query: any = { status: 'EXPECTED_PAYMENT' };
+
+    if (params.user) {
+      query['user'] = new Types.ObjectId(params.user);
+    }
+
+    if (params.branch) {
+      query['branch'] = new Types.ObjectId(params.branch);
+    }
+
+    const now = new Date();
+    const startOfDay = new Date(
+      Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate(),
+        0,
+        0,
+        0,
+        0,
+      ),
+    );
+    const endOfDay = new Date(
+      Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate(),
+        23,
+        59,
+        59,
+        999,
+      ),
+    );
+
+    console.log('Start of Day:', startOfDay);
+    console.log('End of Day:', endOfDay);
+
+    query['follow_up.expected_payment_date'] = {
+      $gte: startOfDay,
+      $lte: endOfDay,
+    };
+
+    console.log('query', query);
+
+    const paymentsDone = await this.model.aggregate([
+      { $match: query }, // Filter by status, user, branch, and date
+      {
+        $group: {
+          _id: null,
+          totalAmount: {
+            $sum: { $toDouble: '$follow_up.expected_payment' }, // Convert and sum amount
+          },
+          data: { $push: '$$ROOT' }, // Store full records
+        },
+      },
+    ]);
+
+    // Get correct total count
+    const totalRecords = paymentsDone.length ? paymentsDone[0].data.length : 0;
+
+    return {
+      data: paymentsDone.length ? paymentsDone[0].data : [],
+      total: totalRecords,
+      totalAmount: paymentsDone.length ? paymentsDone[0].totalAmount : 0,
+    };
+  }
+
+  async getStatusCountByUser(params) {
+    let matchStage = {};
+
+    if (params.user) {
+      matchStage['user'] = Array.isArray(params.user)
+        ? { $in: params.user.map((id) => new Types.ObjectId(id)) }
+        : new Types.ObjectId(params.user);
+    }
+
+    const result = await this.model.aggregate([
+      { $match: matchStage }, // 🔍 Filter by user if provided
+      {
+        $group: {
+          _id: { user: '$user', status: '$status' },
+          count: { $sum: 1 }, // Count occurrences of each status
+        },
+      },
+      {
+        $group: {
+          _id: '$_id.user',
+          statuses: { $push: { status: '$_id.status', count: '$count' } },
+          total: { $sum: '$count' }, // Total records for the user
+        },
+      },
+      {
+        $lookup: {
+          from: 'users',
+          localField: '_id',
+          foreignField: '_id',
+          as: 'userDetails',
+        },
+      },
+      { $unwind: '$userDetails' },
+      {
+        $project: {
+          _id: 0,
+          user: '$_id',
+          userDetails: {
+            username: '$userDetails.username',
+            mobile: '$userDetails.mobile',
+          },
+          status: {
+            total: '$total',
+            fresh: {
+              $sum: {
+                $map: {
+                  input: '$statuses',
+                  as: 's',
+                  in: {
+                    $cond: [{ $eq: ['$$s.status', 'FRESH'] }, '$$s.count', 0],
+                  },
+                },
+              },
+            },
+            callback: {
+              $sum: {
+                $map: {
+                  input: '$statuses',
+                  as: 's',
+                  in: {
+                    $cond: [
+                      { $eq: ['$$s.status', 'CALLBACK'] },
+                      '$$s.count',
+                      0,
+                    ],
+                  },
+                },
+              },
+            },
+            free_trial: {
+              $sum: {
+                $map: {
+                  input: '$statuses',
+                  as: 's',
+                  in: {
+                    $cond: [
+                      { $eq: ['$$s.status', 'FREE_TRIAL'] },
+                      '$$s.count',
+                      0,
+                    ],
+                  },
+                },
+              },
+            },
+            ringing: {
+              $sum: {
+                $map: {
+                  input: '$statuses',
+                  as: 's',
+                  in: {
+                    $cond: [{ $eq: ['$$s.status', 'RINGING'] }, '$$s.count', 0],
+                  },
+                },
+              },
+            },
+            switched_off: {
+              $sum: {
+                $map: {
+                  input: '$statuses',
+                  as: 's',
+                  in: {
+                    $cond: [
+                      { $eq: ['$$s.status', 'SWITCHED_OFF'] },
+                      '$$s.count',
+                      0,
+                    ],
+                  },
+                },
+              },
+            },
+            dead: {
+              $sum: {
+                $map: {
+                  input: '$statuses',
+                  as: 's',
+                  in: {
+                    $cond: [{ $eq: ['$$s.status', 'DEAD'] }, '$$s.count', 0],
+                  },
+                },
+              },
+            },
+            not_reachable: {
+              $sum: {
+                $map: {
+                  input: '$statuses',
+                  as: 's',
+                  in: {
+                    $cond: [
+                      { $eq: ['$$s.status', 'NOT_REACHABLE'] },
+                      '$$s.count',
+                      0,
+                    ],
+                  },
+                },
+              },
+            },
+            not_interested: {
+              $sum: {
+                $map: {
+                  input: '$statuses',
+                  as: 's',
+                  in: {
+                    $cond: [
+                      { $eq: ['$$s.status', 'NOT_INTERESTED'] },
+                      '$$s.count',
+                      0,
+                    ],
+                  },
+                },
+              },
+            },
+            expected_payment: {
+              $sum: {
+                $map: {
+                  input: '$statuses',
+                  as: 's',
+                  in: {
+                    $cond: [
+                      { $eq: ['$$s.status', 'EXPECTED_PAYMENT'] },
+                      '$$s.count',
+                      0,
+                    ],
+                  },
+                },
+              },
+            },
+            payment_done: {
+              $sum: {
+                $map: {
+                  input: '$statuses',
+                  as: 's',
+                  in: {
+                    $cond: [
+                      { $eq: ['$$s.status', 'PAYMENT_DONE'] },
+                      '$$s.count',
+                      0,
+                    ],
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    ]);
+
+    return result;
+  }
+
   async getByUserId(id: string, params) {
     const size = params.size;
     const skip = params.page * params.size;
@@ -68,8 +451,42 @@ export class UserLeadsService {
 
     query = { user: id };
     if (params.status) {
-      query = {
-        $and: [{ status: params.status }],
+      query['status'] = params.status;
+    }
+
+    const now = new Date();
+
+    const startOfDay = new Date(
+      Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate(),
+        0,
+        0,
+        0,
+        0,
+      ),
+    );
+    const endOfDay = new Date(
+      Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate(),
+        23,
+        59,
+        59,
+        999,
+      ),
+    );
+
+    if (params.status == 'FRESH') {
+      query['created_at'] = { $gte: startOfDay, $lte: endOfDay };
+    }
+
+    if (params.status == 'FREE_TRIAL') {
+      query['free_trial.free_trial_date'] = {
+        $gte: startOfDay,
+        $lte: endOfDay,
       };
     }
 
@@ -95,6 +512,45 @@ export class UserLeadsService {
     id: string,
     updatePatientDto: UpdateUserLeadDto,
   ): Promise<UserLead> {
+    if (updatePatientDto.status == 'PAYMENT_DONE') {
+    }
+
+    if (updatePatientDto?.payment) {
+      const paymentDate = updatePatientDto.payment.payment_date;
+      if (paymentDate && !(paymentDate instanceof Date)) {
+        const parsedDate = new Date(paymentDate);
+        if (!isNaN(parsedDate.getTime())) {
+          updatePatientDto.payment.payment_date = parsedDate;
+        } else {
+          console.error('Invalid payment_date:', paymentDate);
+        }
+      }
+    }
+
+    if (updatePatientDto?.free_trial?.free_trial_date) {
+      const paymentDate = updatePatientDto.free_trial.free_trial_date;
+      if (paymentDate && !(paymentDate instanceof Date)) {
+        const parsedDate = new Date(paymentDate);
+        if (!isNaN(parsedDate.getTime())) {
+          updatePatientDto.free_trial.free_trial_date = parsedDate;
+        } else {
+          console.error('Invalid payment_date:', paymentDate);
+        }
+      }
+    }
+
+    if (updatePatientDto?.follow_up?.expected_payment_date) {
+      const paymentDate = updatePatientDto.follow_up.expected_payment_date;
+      if (paymentDate && !(paymentDate instanceof Date)) {
+        const parsedDate = new Date(paymentDate);
+        if (!isNaN(parsedDate.getTime())) {
+          updatePatientDto.follow_up.expected_payment_date = parsedDate;
+        } else {
+          console.error('Invalid payment_date:', paymentDate);
+        }
+      }
+    }
+
     const existingPatient = await this.model
       .findByIdAndUpdate(id, updatePatientDto, { new: true })
       .exec();
@@ -145,5 +601,239 @@ export class UserLeadsService {
       });
       await item.save();
     }
+  }
+
+  async getCurrentMonthPaymentDoneByUserId(id) {
+    const startOfMonth = new Date(
+      new Date().getFullYear(),
+      new Date().getMonth(),
+      1,
+    ); // First day of the month
+    const endOfMonth = new Date(
+      new Date().getFullYear(),
+      new Date().getMonth() + 1,
+      0,
+      23,
+      59,
+      59,
+    ); //
+    //  Last day of the month
+
+    console.log(id);
+
+    const result = await this.model.aggregate([
+      {
+        $match: {
+          user: id, // Filter by user ID
+          status: 'PAYMENT_DONE', // Filter only completed payments
+          'payment.payment_date': {
+            $gte: startOfMonth,
+            $lte: endOfMonth,
+          },
+        },
+      },
+      {
+        $group: {
+          _id: '$user',
+          totalPayment: {
+            $sum: { $toDouble: '$payment.payment_amount' }, // Convert string to number and sum
+          },
+        },
+      },
+    ]);
+
+    return result.length > 0 ? result[0].totalPayment : 0; // Return total or 0 if no payments
+  }
+
+  async getCurrentMonthTeamPaymentDone(params) {
+    let matchStage: any = {
+      status: 'PAYMENT_DONE',
+    };
+
+    if (params.user && Array.isArray(params.user) && params.user.length > 0) {
+      matchStage['user'] = {
+        $in: params.user.map((id) => new Types.ObjectId(id)),
+      };
+    }
+
+    const startOfMonth = new Date(
+      new Date().getFullYear(),
+      new Date().getMonth(),
+      1,
+    );
+    const endOfMonth = new Date(
+      new Date().getFullYear(),
+      new Date().getMonth() + 1,
+      0,
+      23,
+      59,
+      59,
+    );
+
+    console.log('match', matchStage);
+
+    const result = await this.model.aggregate([
+      {
+        $match: {
+          ...matchStage,
+          'payment.payment_date': {
+            $gte: startOfMonth,
+            $lte: endOfMonth,
+          },
+        },
+      },
+      {
+        $lookup: {
+          from: 'users', // Assuming your user collection is 'users'
+          localField: 'user',
+          foreignField: '_id',
+          as: 'userDetails',
+        },
+      },
+      {
+        $unwind: '$userDetails', // Convert user array to object
+      },
+      {
+        $project: {
+          _id: 0,
+          name: 1, // Include the payer's name
+          mobile: 1, // Include the payer's mobile
+          city: 1, // Include city if available
+          payment_amount: '$payment.payment_amount',
+          payment_mode: '$payment.payment_mode',
+          payment_details: '$payment.payment_details',
+          payment_date: '$payment.payment_date',
+          userDetails: {
+            username: '$userDetails.username',
+            mobile: '$userDetails.mobile',
+          },
+        },
+      },
+    ]);
+
+    // Calculate overall total payment sum
+    const overallTotal = result.reduce(
+      (sum, payment) => sum + Number(payment.payment_amount),
+      0,
+    );
+
+    return {
+      totalPayment: overallTotal,
+      payments: result,
+    };
+  }
+
+  async getTodayTotalPayment(userId: string) {
+    const userObjectId = new Types.ObjectId(userId);
+
+    // Get today's date range (midnight to 23:59:59)
+    const startOfDay = new Date(new Date().setHours(0, 0, 0, 0));
+    const endOfDay = new Date(new Date().setHours(23, 59, 59, 999));
+
+    console.log(userId);
+
+    const result = await this.model.aggregate([
+      {
+        $match: {
+          user: userObjectId, // Filter by user ID
+          status: 'PAYMENT_DONE', // Only completed payments
+          'payment.payment_date': {
+            $gte: startOfDay,
+            $lte: endOfDay,
+          },
+        },
+      },
+      {
+        $group: {
+          _id: '$user',
+          totalPayment: {
+            $sum: { $toDouble: '$payment.payment_amount' }, // Convert to number and sum
+          },
+        },
+      },
+    ]);
+
+    return result.length > 0 ? result[0].totalPayment : 0; // Return total or 0 if no payments
+  }
+
+  async getTodayTotalPaymentByBranch(branchId: string) {
+    const branchObjectId = new Types.ObjectId(branchId);
+    console.log(branchObjectId);
+
+    const now = new Date();
+    const startOfDay = new Date(
+      Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate(),
+        0,
+        0,
+        0,
+        0,
+      ),
+    );
+    const endOfDay = new Date(
+      Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate(),
+        23,
+        59,
+        59,
+        999,
+      ),
+    );
+
+    console.log('Start:', startOfDay, 'End:', endOfDay);
+
+    // 1️⃣ Fetch all users from the branch with roles 'teamlead' or 'employee'
+    const users = await this.model.find(
+      { branch: branchObjectId }, // Filter by branch and role
+    );
+
+    // console.log(users);
+
+    if (users.length === 0) return { total: 0, data: [] }; // Return early if no users exist
+
+    const userIds = users.map((user) => user?.user); // Extract user IDs
+
+    console.log('ids', userIds);
+
+    // 2️⃣ Fetch payments for those users
+    const payments = await this.model.find(
+      {
+        user: { $in: userIds },
+        status: 'PAYMENT_DONE',
+        'payment.payment_mode': 'UPI',
+        'payment.payment_date': {
+          $gte: startOfDay,
+          $lte: endOfDay,
+        },
+      },
+      { user: 1, 'payment.payment_amount': 1 }, // Fetch only necessary fields
+    );
+
+    console.log('Vk', payments);
+
+    // 3️⃣ Create a user payment mapping
+    const userPaymentMap = new Map<string, number>();
+    payments.forEach((payment) => {
+      const userId = payment.user.toString();
+      const amount = parseFloat(payment.payment.payment_amount) || 0;
+      userPaymentMap.set(userId, (userPaymentMap.get(userId) || 0) + amount);
+    });
+
+    // 4️⃣ Map user data and compute total payment
+    let total = 0;
+    const data = users.map((user) => {
+      const payment = userPaymentMap.get(user._id.toString()) || 0;
+      total += payment;
+      return {
+        ...user.toObject(), // Include all user data
+        payment, // Add payment field
+      };
+    });
+
+    return { total, data };
   }
 }

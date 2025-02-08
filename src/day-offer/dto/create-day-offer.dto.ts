@@ -1,37 +1,32 @@
 import { Type } from 'class-transformer';
-import {
-  IsString,
-  IsNotEmpty,
-  IsOptional,
-  IsDate,
-  IsNumber,
-} from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsDate } from 'class-validator';
 
-export class CreateBranchDto {
+export class CreateDayOfferDto {
   @IsString()
   @IsNotEmpty()
-  name: string;
+  business: string;
 
   @IsString()
   @IsNotEmpty()
-  address: string;
+  incentive: string;
 
   @IsString()
   @IsNotEmpty()
-  status: string;
+  role: string;
 
-  @IsNumber()
-  @IsOptional()
-  spot_incentive_base_business: number;
-
-  @IsNumber()
+  @IsString()
   @IsNotEmpty()
-  max_users: number;
+  branch: string;
 
   @IsNotEmpty()
   @IsDate()
   @Type(() => Date)
-  expiry_date: Date = new Date();
+  offer_start_date?: Date = new Date();
+
+  @IsNotEmpty()
+  @IsDate()
+  @Type(() => Date)
+  offer_end_date?: Date = new Date();
 
   @IsOptional()
   @IsDate()

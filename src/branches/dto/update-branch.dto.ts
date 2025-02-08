@@ -22,6 +22,10 @@ export class UpdateBranchDto {
 
   @IsNumber()
   @IsOptional()
+  spot_incentive_base_business: number;
+
+  @IsNumber()
+  @IsOptional()
   max_users: number;
 
   @IsString()

@@ -15,7 +15,6 @@ import { extname } from 'path';
       storage: diskStorage({
         destination: (req, file, cb) => {
           const uploadPath = process.env.UPLOAD_PATH + 'blogs/';
-          console.log(uploadPath);
           cb(null, uploadPath);
         },
         filename: (req, file, callback) => {

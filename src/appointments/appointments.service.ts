@@ -32,7 +32,6 @@ export class AppointmentsService {
   }
 
   async findAll(params) {
-    console.log(params);
     const { page, size, q, from, to, status } = params;
     const skip = page * size;
 
@@ -62,11 +61,8 @@ export class AppointmentsService {
     if (q) {
       const patientData = await this.patientService.globalSearch(q);
       const patient_ids = patientData.map((item: any) => item?._id);
-      console.log('patient', patientData);
       query['patient'] = { $in: patient_ids };
     }
-
-    console.log('q', query);
 
     const queryM = this.appointmentModel
       .find(query)
@@ -78,7 +74,6 @@ export class AppointmentsService {
     // .exec();
 
     const appointments = await queryM.exec();
-    console.log(appointments.length);
 
     const totalRecords = await this.appointmentModel
       .countDocuments(query)
@@ -106,7 +101,6 @@ export class AppointmentsService {
 
   async findByPatienId(id: string) {
     const patient = await this.patientService.findOne(id);
-    // console.log('mob',mobile)
     const appointments = await this.appointmentModel
       .find({ patient: id })
       .populate('patient')
@@ -156,14 +150,11 @@ export class AppointmentsService {
   }
 
   async removeReport(id: string, image_id: number): Promise<Appointment> {
-    console.log('app', id);
-    console.log('img', image_id);
     let appointment = await this.appointmentModel.findById(id).exec();
     let files = appointment.files.filter((item: any) => {
       return item.id != image_id;
     });
 
-    console.log('files', files);
     return this.appointmentModel
       .findByIdAndUpdate(
         id,

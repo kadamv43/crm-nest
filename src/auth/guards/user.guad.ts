@@ -8,10 +8,7 @@ export class UserGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest();
     const token = request.headers.authorization?.split(' ')[1];
-    console.log("token",token)
     const decoded = this.jwtService.verify(token);
-    return request.user = decoded
-    console.log(decoded)
-    return decoded ;
+    return (request.user = decoded);
   }
 }

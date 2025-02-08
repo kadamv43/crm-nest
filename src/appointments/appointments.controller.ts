@@ -50,12 +50,10 @@ export class AppointmentsController {
     if (req.user['role'] == 'admin' || req.user['role'] == 'staff') {
       return this.appointmentsService.findAll(query);
     } else {
-      // console.log(req)
       let doctor: any = await this.doctorService.findBy({
         user_id: req.user['userId'],
       });
 
-      // console.log(doctor);
       query.doctor = doctor[0]._id;
       return await this.appointmentsService.findAll(query);
     }
@@ -103,7 +101,6 @@ export class AppointmentsController {
     @Param('id') id: string,
     @Body() updateAppointmentDto: UpdateAppointmentDto,
   ) {
-    console.log('updateDOc', updateAppointmentDto);
     if (updateAppointmentDto.follow_up) {
       let appointment_number =
         await this.appointmentsService.generateUniqueAppointmentNumber();

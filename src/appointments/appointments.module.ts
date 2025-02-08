@@ -35,7 +35,6 @@ import * as fs from 'fs';
             fs.mkdirSync(uploadPath, { recursive: true }); // Create parent directories if needed
           }
 
-          console.log(uploadPath);
           cb(null, uploadPath);
         },
         filename: (req, file, callback) => {

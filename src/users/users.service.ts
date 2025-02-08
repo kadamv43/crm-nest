@@ -1,11 +1,12 @@
 import {
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import mongoose, { Model, Types } from 'mongoose';
 import { User, UserDocument } from './user.schema';
 import * as bcrypt from 'bcrypt';
 import { EmailService } from 'src/email/email.service';
@@ -25,6 +26,15 @@ export class UsersService {
     if (req.user?.role === 'admin') {
       await this.checkUserAddLimit(req); // Ensure user limit before assignment
       createUserDto.branch = req.user?.branch?._id;
+    }
+
+    const existingUser = await this.userModel.findOne({
+      username: createUserDto.username,
+      branch: createUserDto.branch,
+    });
+
+    if (existingUser) {
+      throw new ConflictException('Username already exist');
     }
 
     const createdUser = new this.userModel(createUserDto);
@@ -56,12 +66,10 @@ export class UsersService {
       };
     }
 
-    console.log(params);
     if (params.role) {
       const excludeRoles = params.IsSuperAdmin
         ? ['superadmin']
         : ['superadmin', 'admin'];
-      console.log(excludeRoles);
       query = {
         ...query,
         $and: [
@@ -86,8 +94,13 @@ export class UsersService {
       };
     }
 
-    // console.log(params);
-    console.log(query);
+    if (params.teamlead) {
+      query = {
+        ...query,
+        $and: [...(query.$and || []), { teamlead: params.teamlead }],
+      };
+    }
+
     const users = await this.userModel
       .find(query)
       .populate('branch')
@@ -110,6 +123,22 @@ export class UsersService {
   async findByField(queryData): Promise<User> {
     const user = await this.userModel
       .findOne(queryData)
+      .populate('branch')
+      .exec();
+    return user;
+  }
+
+  async findByTeamlead(teamLeadId): Promise<User[]> {
+    const user = await this.userModel
+      .find({ teamlead: teamLeadId })
+      .populate('branch')
+      .exec();
+    return user;
+  }
+
+  async findByBranch(branchId): Promise<User[]> {
+    const user = await this.userModel
+      .find({ branch: branchId })
       .populate('branch')
       .exec();
     return user;
@@ -213,5 +242,47 @@ export class UsersService {
     hashedPassword: string,
   ): Promise<boolean> {
     return await bcrypt.compare(plainPassword, hashedPassword);
+  }
+
+  async getTotalTargetAllEmployeeByBranch(query) {
+    const branchObjectId = new Types.ObjectId(query?.branch);
+
+    const result = await this.userModel.aggregate([
+      {
+        $match: {
+          branch: branchObjectId, // Filter by branch ID
+          role: { $in: ['teamlead', 'employee'] }, // Match roles
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalTarget: { $sum: '$target' }, // Sum the target field
+        },
+      },
+    ]);
+
+    return result.length > 0 ? result[0].totalTarget : 0; // Return total or 0 if no users found
+  }
+
+  async getTotaltargetOfTeamLead(teamlead) {
+    const teamleadObjectId = new Types.ObjectId(teamlead);
+
+    const result = await this.userModel.aggregate([
+      {
+        $match: {
+          teamlead: teamleadObjectId, // Filter by branch ID
+          role: 'employee', // Match roles
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalTarget: { $sum: '$target' }, // Sum the target field
+        },
+      },
+    ]);
+
+    return result.length > 0 ? result[0].totalTarget : 0; // Return total or 0 if no users found
   }
 }
