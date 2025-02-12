@@ -1,7 +1,7 @@
 // src/patients/patients.service.ts
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { HotLead } from './hot-lead.schema';
 import { UpdateHotLeadDto } from './dto/update-hot-lead.dto';
 import { CreateHotLeadDto } from './dto/create-hot-lead.dto';
@@ -22,6 +22,11 @@ export class HotLeadsService {
     }
     const createdPatient = new this.model(createDto);
     return createdPatient.save();
+  }
+
+  async deleteByIds(ids: string[]): Promise<any> {
+    const objectIds = ids.map((id) => new Types.ObjectId(id)); // Convert to ObjectId
+    return await this.model.deleteMany({ _id: { $in: objectIds } });
   }
 
   async findAll(params) {

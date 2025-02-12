@@ -132,18 +132,15 @@ export class DashboardController {
       const userIds = users.map((user: any) => {
         return user?._id;
       });
-      console.log('users', users);
       return this.userLeadsService.getStatusCountByUser({ user: userIds });
     } else if (user.role == 'admin') {
       const users = await this.userService.findByBranch(user?.branch);
       const userIds = users.map((user: any) => {
         return user?._id;
       });
-      console.log('users', users);
       return this.userLeadsService.getStatusCountByUser({ user: userIds });
     } else if (user.role == 'teamlead') {
       const users = await this.userService.findByTeamlead(query?.user);
-      console.log('vkfirst', users);
       const userIds = users.map((user: any) => {
         return user?._id;
       });

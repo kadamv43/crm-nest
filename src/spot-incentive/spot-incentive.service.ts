@@ -83,8 +83,6 @@ export class SpotIncentiveService {
       })
       .sort({ business: 1 }); // Sort by business in ascending order
 
-    console.log('ui', result);
-
     // Find the closest lower bound business bracket
     let closestBracket = null;
     for (const entry of result) {

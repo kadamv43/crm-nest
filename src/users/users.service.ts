@@ -41,6 +41,23 @@ export class UsersService {
     return await createdUser.save();
   }
 
+  async changePassword(data: any, req): Promise<any> {
+    const { password, old_password } = data;
+    const existingUser = await this.userModel.findById(req.user['userId']);
+
+    if (!existingUser) {
+      throw new ConflictException('user does not exit');
+    }
+
+    if (existingUser.password_text == old_password) {
+      existingUser.password_text = password;
+      existingUser.password = password;
+      return existingUser.save();
+    } else {
+      throw new ConflictException('Old password does not match');
+    }
+  }
+
   async checkUserAddLimit(req): Promise<void> {
     const users = await this.findBy({ branch: req.user?.branch?._id });
 

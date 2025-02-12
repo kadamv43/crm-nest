@@ -9,6 +9,7 @@ import { Lead, LeadSchema } from './lead.schema';
     MongooseModule.forFeature([{ name: Lead.name, schema: LeadSchema }]),
   ],
   providers: [LeadsService],
+  exports: [MongooseModule, LeadsService],
   controllers: [LeadsController],
 })
 export class LeadsModule {}

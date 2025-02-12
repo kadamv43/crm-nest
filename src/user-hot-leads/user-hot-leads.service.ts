@@ -1,4 +1,3 @@
-// src/patients/patients.service.ts
 import {
   BadRequestException,
   Injectable,
@@ -6,19 +5,18 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { model, Model, Types } from 'mongoose';
-import { UserLead } from './user-lead.schema';
 import { CreateUserLeadDto } from './dto/create-user-lead.dto';
 import { UpdateUserLeadDto } from './dto/update-user-lead.dto';
 import { ObjectId } from 'mongoose';
 import { types } from 'util';
 import { iif } from 'rxjs';
+import { UserHotLead } from './user-hot-lead.schema';
 
 @Injectable()
-export class UserLeadsService {
+export class UserHotLeadsService {
   constructor(
-    @InjectModel(UserLead.name) private readonly model: Model<UserLead>,
+    @InjectModel(UserHotLead.name) private readonly model: Model<UserHotLead>,
   ) {}
-
   async create(createDto: CreateUserLeadDto[]) {
     // const { mobile } = createDto;
     // const existingPatient = await this.model.findOne({ mobile }).exec();
@@ -59,7 +57,7 @@ export class UserLeadsService {
     return { data: patients, total: totalRecords };
   }
 
-  async getById(id: string): Promise<UserLead> {
+  async getById(id: string): Promise<UserHotLead> {
     const patient = await this.model.findById(id).exec();
     if (!patient) {
       throw new NotFoundException(`Patient #${id} not found`);
@@ -328,9 +326,18 @@ export class UserLeadsService {
       ),
     );
 
-    matchStage['$and'] = [
+    matchStage['$or'] = [
       {
         created_at: { $gte: startOfDay, $lte: endOfDay },
+        status: { $nin: ['FREE_TRIAL', 'PAYMENT_DONE'] },
+      },
+      {
+        status: 'FREE_TRIAL',
+        free_trial_date: { $gte: startOfDay, $lte: endOfDay },
+      },
+      {
+        status: 'PAYMENT_DONE',
+        payment_date: { $gte: startOfDay, $lte: endOfDay },
       },
     ];
 
@@ -571,18 +578,18 @@ export class UserLeadsService {
     return { data: patients, total: totalRecords };
   }
 
-  async findBy(query: Record<string, any>): Promise<UserLead[]> {
+  async findBy(query: Record<string, any>): Promise<UserHotLead[]> {
     return this.model.find(query).exec();
   }
 
-  async findByOne(query: Record<string, any>): Promise<UserLead> {
+  async findByOne(query: Record<string, any>): Promise<UserHotLead> {
     return this.model.findOne(query).exec();
   }
 
   async update(
     id: string,
     updatePatientDto: UpdateUserLeadDto,
-  ): Promise<UserLead> {
+  ): Promise<UserHotLead> {
     if (updatePatientDto.status == 'PAYMENT_DONE') {
     }
 
@@ -640,7 +647,7 @@ export class UserLeadsService {
     }
   }
 
-  async remove(id: string): Promise<UserLead> {
+  async remove(id: string): Promise<UserHotLead> {
     const deletedPatient = await this.model.findByIdAndDelete(id).exec();
     if (!deletedPatient) {
       throw new NotFoundException(`Patient #${id} not found`);
@@ -648,7 +655,7 @@ export class UserLeadsService {
     return deletedPatient;
   }
 
-  async globalSearch(query: string): Promise<UserLead[]> {
+  async globalSearch(query: string): Promise<UserHotLead[]> {
     const searchRegex = new RegExp(query, 'i'); // 'i' makes it case insensitive
     return this.model
       .find({

@@ -18,8 +18,6 @@ export class PatientsService {
     const { mobile } = createPatientDto;
     const existingPatient = await this.patientModel.findOne({ mobile }).exec();
 
-    console.log('ex', existingPatient);
-
     if (existingPatient) {
       return existingPatient;
     }
@@ -123,7 +121,6 @@ export class PatientsService {
       .sort({ patient_number: -1 })
       .exec();
 
-    console.log(lastPatient);
     let lastNumber = 0;
 
     if (lastPatient && lastPatient?.patient_number) {

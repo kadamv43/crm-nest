@@ -7,9 +7,10 @@ export class FileUploadService {
     const filePaths: string[] = [];
 
     files.forEach((file) => {
-      
-      const filePath = join(file.destination.replace('public/',''), file.filename);
-      console.log(filePath);
+      const filePath = join(
+        file.destination.replace('public/', ''),
+        file.filename,
+      );
       filePaths.push(filePath);
     });
 

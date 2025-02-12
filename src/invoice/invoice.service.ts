@@ -18,7 +18,6 @@ export class InvoiceService {
   ) {}
 
   async create(createInvoiceDto: CreateInvoiceDto): Promise<Invoice> {
-    console.log(createInvoiceDto);
     await this.deleteManyByQuery({ appointment: createInvoiceDto.appointment });
     const newInvoice = new this.invoiceModel(createInvoiceDto);
     return await newInvoice.save();
@@ -106,9 +105,8 @@ export class InvoiceService {
     return `${this.prefix}${paddedNumber}`;
   }
 
-  async sendFile(invoiceId: string,req:Request) {
-    const domain =  `${req.protocol}://${req.get('host')}`;
-    console.log(domain);
+  async sendFile(invoiceId: string, req: Request) {
+    const domain = `${req.protocol}://${req.get('host')}`;
 
     const invoice = await this.invoiceModel
       .findById(invoiceId)

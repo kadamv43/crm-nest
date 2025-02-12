@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { InvoiceController } from './invoice.controller';
 import { InvoiceService } from './invoice.service';
 import { MongooseModule } from '@nestjs/mongoose';
-import { Invoice,InvoiceSchema } from './invoice.schema';
+import { Invoice, InvoiceSchema } from './invoice.schema';
 import { AppointmentsService } from 'src/appointments/appointments.service';
 import { AppointmentsModule } from 'src/appointments/appointments.module';
 import { HttpModule } from '@nestjs/axios';
@@ -21,7 +21,6 @@ import { extname } from 'path';
       storage: diskStorage({
         destination: (req, file, cb) => {
           const uploadPath = process.env.UPLOAD_PATH + 'invoice/';
-          console.log(uploadPath);
           cb(null, uploadPath);
         },
         filename: (req, file, callback) => {
@@ -34,6 +33,6 @@ import { extname } from 'path';
   ],
   controllers: [InvoiceController],
   providers: [InvoiceService, AppointmentsService],
-  exports: [MongooseModule,InvoiceService],
+  exports: [MongooseModule, InvoiceService],
 })
 export class InvoiceModule {}

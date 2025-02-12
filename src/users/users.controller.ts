@@ -36,6 +36,12 @@ export class UsersController {
     return this.usersService.create(createUserDto, req);
   }
 
+  @Post('change-password')
+  // @Roles(Role.Admin)
+  async changePassword(@Body() createUserDto: any, @Req() req: Request) {
+    return this.usersService.changePassword(createUserDto, req);
+  }
+
   @Get('/')
   findAll(@Query() query: Record<string, any>, @Req() req: Request) {
     if (req.user['role'] == 'admin') {

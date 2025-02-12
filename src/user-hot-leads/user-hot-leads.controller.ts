@@ -18,18 +18,19 @@ import {
 
 import { FileInterceptor } from '@nestjs/platform-express';
 import * as XLSX from 'xlsx';
-import { UserLeadsService } from './user-leads.service';
 import { UpdateUserLeadDto } from './dto/update-user-lead.dto';
 import { Request } from 'express';
 import { JwtAuthGuard } from 'src/auth/guards/jwt.guard';
 import { LeadsService } from 'src/leads/leads.service';
+import { UserHotLeadsService } from './user-hot-leads.service';
+import { HotLeadsService } from 'src/hot-leads/hot-leads.service';
 
 @UseGuards(JwtAuthGuard)
-@Controller('user-leads')
-export class UserLeadsController {
+@Controller('user-hot-leads')
+export class UserHotLeadsController {
   constructor(
-    private readonly service: UserLeadsService,
-    private leadService: LeadsService,
+    private readonly service: UserHotLeadsService,
+    private hotLeadsService: HotLeadsService,
   ) {}
 
   @Post()
@@ -74,7 +75,7 @@ export class UserLeadsController {
       };
     });
     await this.service.create(data);
-    return this.leadService.deleteByIds(leadIds); // No need for await before return
+    return this.hotLeadsService.deleteByIds(leadIds); // No need for await before return
   }
 
   @Get()

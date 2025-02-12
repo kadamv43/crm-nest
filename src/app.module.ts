@@ -38,6 +38,7 @@ import { CheckAccountExpiryMiddleware } from './check-account-expiry.middleware'
 import { DayOfferModule } from './day-offer/day-offer.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { IncentiveModule } from './incentive/incentive.module';
+import { UserHotLeadsModule } from './user-hot-leads/user-hot-leads.module';
 
 @Module({
   imports: [
@@ -75,6 +76,7 @@ import { IncentiveModule } from './incentive/incentive.module';
     DayOfferModule,
     DashboardModule,
     IncentiveModule,
+    UserHotLeadsModule,
   ],
   controllers: [AppController, UploadsController],
   providers: [AppService, PdfService, FileUploadService],

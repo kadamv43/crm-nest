@@ -1,7 +1,7 @@
 // src/patients/patients.service.ts
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { Lead } from './lead.schema';
 import { CreateLeadDto } from './dto/create-lead.dto';
 import { UpdateLeadDto } from './dto/update-lead.dto';
@@ -20,6 +20,11 @@ export class LeadsService {
     // }
     return await this.model.insertMany(createDto);
     // const createdPatient = new this.model(createDto);
+  }
+
+  async deleteByIds(ids: string[]): Promise<any> {
+    const objectIds = ids.map((id) => new Types.ObjectId(id)); // Convert to ObjectId
+    return await this.model.deleteMany({ _id: { $in: objectIds } });
   }
 
   async findAll(params) {
@@ -109,7 +114,6 @@ export class LeadsService {
   }
 
   async importData(jsonData) {
-    console.log(jsonData);
     for (const data of jsonData) {
       const item = new this.model({
         mobile: data['mobile'],

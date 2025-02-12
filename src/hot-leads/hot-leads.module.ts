@@ -9,6 +9,7 @@ import { HotLead, HotLeadSchema } from './hot-lead.schema';
   imports: [
     MongooseModule.forFeature([{ name: HotLead.name, schema: HotLeadSchema }]),
   ],
+  exports: [MongooseModule, HotLeadsService],
   controllers: [HotLeadsController],
   providers: [HotLeadsService],
 })
