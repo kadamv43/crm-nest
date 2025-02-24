@@ -150,6 +150,36 @@ export class DashboardController {
     }
   }
 
+  @Get('reports')
+  async getReports(@Req() req: Request, @Query() query: Record<string, any>) {
+    const user = await this.userService.findOne(query?.user);
+
+    if (user.role == 'superadmin') {
+      const users = await this.userService.findByBranch(query?.branch);
+      const userIds = users.map((user: any) => {
+        return user?._id;
+      });
+      query['user'] = userIds;
+      return this.userLeadsService.getReports(query);
+    } else if (user.role == 'admin') {
+      const users = await this.userService.findByBranch(user?.branch);
+      const userIds = users.map((user: any) => {
+        return user?._id;
+      });
+      query['user'] = userIds;
+      return this.userLeadsService.getReports(query);
+    } else if (user.role == 'teamlead') {
+      const users = await this.userService.findByTeamlead(query?.user);
+      const userIds = users.map((user: any) => {
+        return user?._id;
+      });
+      query['user'] = userIds;
+      return this.userLeadsService.getReports(query);
+    } else {
+      return this.userLeadsService.getReports(query);
+    }
+  }
+
   @Get('todays-payments-done')
   async getTodaysPaymentsDone(
     @Req() req: Request,

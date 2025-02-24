@@ -87,6 +87,22 @@ export class UserLeadsController {
     return this.service.getByUserId(req?.user['userId'], query);
   }
 
+  @Get('get-lead-history')
+  async getLeadHistory(
+    @Req() req: Request,
+    @Query() query: Record<string, any>,
+  ) {
+    return this.service.getLeadHistory(query);
+  }
+
+  @Get('my-follow-up')
+  async getMyFollowUp(
+    @Req() req: Request,
+    @Query() query: Record<string, any>,
+  ) {
+    return this.service.getByUserIdFollowUp(req?.user['userId'], query);
+  }
+
   @Get('last-week-free-trials')
   async lastWeekFreeTrials(
     @Req() req: Request,

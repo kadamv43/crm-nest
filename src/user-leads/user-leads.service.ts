@@ -12,6 +12,7 @@ import { UpdateUserLeadDto } from './dto/update-user-lead.dto';
 import { ObjectId } from 'mongoose';
 import { types } from 'util';
 import { iif } from 'rxjs';
+import { LeadsService } from 'src/leads/leads.service';
 
 @Injectable()
 export class UserLeadsService {
@@ -79,10 +80,29 @@ export class UserLeadsService {
         : new Types.ObjectId(params.user);
     }
 
-    const today = new Date();
-    const startOfDay = new Date(today.setUTCHours(0, 0, 0, 0));
-    const endOfDay = new Date(today.setUTCHours(23, 59, 59, 999));
-
+    const now = new Date();
+    const startOfDay = new Date(
+      Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate(),
+        0,
+        0,
+        0,
+        0,
+      ),
+    );
+    const endOfDay = new Date(
+      Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate(),
+        23,
+        59,
+        59,
+        999,
+      ),
+    );
     // Add date filter for free_trial_date
     matchStage['free_trial.free_trial_date'] = {
       $gte: startOfDay,
@@ -514,6 +534,90 @@ export class UserLeadsService {
     return result;
   }
 
+  async getReports(params) {
+    console.log('report', params);
+    let matchStage = {};
+    const { from, to, status, size, page } = params;
+    const skip = page * size;
+
+    // Match by user if provided
+    if (params.user) {
+      matchStage['user'] = Array.isArray(params.user)
+        ? { $in: params.user.map((id) => new Types.ObjectId(id)) }
+        : new Types.ObjectId(params.user);
+    }
+
+    // Match by status if provided
+    if (status) {
+      matchStage['status'] = status;
+    }
+
+    // Filter by 'from' date if provided
+    if (from) {
+      matchStage['created_at'] = {
+        ...matchStage['created_at'],
+        $gte: new Date(from),
+      };
+    }
+
+    // Filter by 'to' date if provided
+    if (to) {
+      if (!matchStage['created_at']) {
+        matchStage['created_at'] = {};
+      }
+      matchStage['created_at']['$lte'] = new Date(to);
+    }
+
+    console.log('query', matchStage);
+
+    const result = await this.model
+      .aggregate([
+        { $match: matchStage }, // Match the filters based on user, status, date, etc.
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'user',
+            foreignField: '_id',
+            as: 'userDetails',
+          },
+        },
+        { $unwind: '$userDetails' }, // Unwind userDetails for each report
+        {
+          $project: {
+            _id: 0,
+            user: '$user',
+            userDetails: {
+              username: '$userDetails.username',
+              mobile: '$userDetails.mobile',
+            },
+            free_trial: 1,
+            follow_up: 1,
+            payment: 1,
+            mobile: 1,
+            name: 1,
+            city: 1,
+            status: 1, // Include status field
+            created_at: 1, // Include creation date
+          },
+        },
+      ])
+      .skip(skip)
+      .sort({ created_at: 'desc' })
+      .limit(Number(size))
+      .exec();
+
+    const totalRecords = await this.model.countDocuments(matchStage).exec();
+    return { data: result, total: totalRecords };
+    // return result;
+  }
+
+  getEndDate(startDate) {
+    const dateObj = new Date(startDate);
+    dateObj.setDate(dateObj.getDate() + 1); // Move to the next day
+    dateObj.setHours(0, 0, 0, 0); // Reset to midnight (start of the new day)
+    return dateObj.toISOString(); // Return as UTC time
+  }
+
   async getByUserId(id: string, params) {
     const size = params.size;
     const skip = params.page * params.size;
@@ -550,9 +654,9 @@ export class UserLeadsService {
       ),
     );
 
-    if (params.status == 'FRESH') {
-      query['created_at'] = { $gte: startOfDay, $lte: endOfDay };
-    }
+    // if (params.status == 'FRESH') {
+    //   query['created_at'] = { $gte: startOfDay, $lte: endOfDay };
+    // }
 
     if (params.status == 'FREE_TRIAL') {
       query['free_trial.free_trial_date'] = {
@@ -564,6 +668,44 @@ export class UserLeadsService {
     const patients = await this.model
       .find(query)
       .sort({ created_at: 'desc' })
+      .skip(skip)
+      .limit(size)
+      .exec();
+    const totalRecords = await this.model.countDocuments(query).exec();
+    return { data: patients, total: totalRecords };
+  }
+
+  async getByUserIdFollowUp(id: string, params) {
+    const size = params.size;
+    const skip = params.page * params.size;
+
+    let query = {};
+
+    query = { user: id };
+
+    query['status'] = 'FREE_TRIAL';
+
+    const now = new Date();
+
+    const startOfDay = new Date(
+      Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate(),
+        0,
+        0,
+        0,
+        0,
+      ),
+    );
+
+    query['free_trial.free_trial_date'] = {
+      $gte: startOfDay,
+    };
+
+    const patients = await this.model
+      .find(query)
+      .sort({ 'free_trial.free_trial_date': 'asc' })
       .skip(skip)
       .limit(size)
       .exec();
@@ -646,6 +788,10 @@ export class UserLeadsService {
       throw new NotFoundException(`Patient #${id} not found`);
     }
     return deletedPatient;
+  }
+
+  async getLeadHistory(query: Record<string, any>): Promise<UserLead[]> {
+    return this.model.find(query).exec();
   }
 
   async globalSearch(query: string): Promise<UserLead[]> {
