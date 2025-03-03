@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsString, IsOptional, IsDate } from 'class-validator';
+import { IsString, IsOptional, IsDate, IsBoolean } from 'class-validator';
 
 export class UpdateUserLeadDto {
   @IsString()
@@ -24,6 +24,10 @@ export class UpdateUserLeadDto {
 
   @IsOptional()
   callback: any;
+
+  @IsBoolean()
+  @IsOptional()
+  is_hot_lead: boolean;
 
   @IsString()
   @IsOptional()

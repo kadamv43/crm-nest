@@ -5,6 +5,7 @@ import {
   IsOptional,
   IsDate,
   isObject,
+  IsBoolean,
 } from 'class-validator';
 
 export class CreateUserLeadDto {
@@ -31,6 +32,10 @@ export class CreateUserLeadDto {
   @IsString()
   @IsNotEmpty()
   status: string;
+
+  @IsBoolean()
+  @IsOptional()
+  is_hot_lead: boolean;
 
   @IsOptional()
   free_trial: any;

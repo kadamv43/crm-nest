@@ -25,6 +25,9 @@ export class UserLead {
   @Prop({ required: false, trim: true, default: 'FRESH' })
   status?: string;
 
+  @Prop({ required: false, default: false })
+  is_hot_lead?: boolean;
+
   @Prop({
     type: Object,
     required: false,

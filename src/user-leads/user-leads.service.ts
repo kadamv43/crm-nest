@@ -584,7 +584,7 @@ export class UserLeadsService {
         { $unwind: '$userDetails' }, // Unwind userDetails for each report
         {
           $project: {
-            _id: 0,
+            _id: 1,
             user: '$user',
             userDetails: {
               username: '$userDetails.username',
@@ -625,6 +625,63 @@ export class UserLeadsService {
     let query = {};
 
     query = { user: id };
+    if (params.status) {
+      query['status'] = params.status;
+    }
+
+    const now = new Date();
+
+    const startOfDay = new Date(
+      Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate(),
+        0,
+        0,
+        0,
+        0,
+      ),
+    );
+    const endOfDay = new Date(
+      Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate(),
+        23,
+        59,
+        59,
+        999,
+      ),
+    );
+
+    // if (params.status == 'FRESH') {
+    //   query['created_at'] = { $gte: startOfDay, $lte: endOfDay };
+    // }
+
+    if (params.status == 'FREE_TRIAL') {
+      query['free_trial.free_trial_date'] = {
+        $gte: startOfDay,
+        $lte: endOfDay,
+      };
+    }
+
+    const patients = await this.model
+      .find(query)
+      .sort({ created_at: 'desc' })
+      .skip(skip)
+      .limit(size)
+      .exec();
+    const totalRecords = await this.model.countDocuments(query).exec();
+    return { data: patients, total: totalRecords };
+  }
+
+  async getByUserIdHotLeads(id: string, params) {
+    const size = params.size;
+    const skip = params.page * params.size;
+
+    let query = {};
+
+    query = { user: id, is_hot_lead: true };
     if (params.status) {
       query['status'] = params.status;
     }

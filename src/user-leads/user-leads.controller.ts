@@ -23,6 +23,7 @@ import { UpdateUserLeadDto } from './dto/update-user-lead.dto';
 import { Request } from 'express';
 import { JwtAuthGuard } from 'src/auth/guards/jwt.guard';
 import { LeadsService } from 'src/leads/leads.service';
+import { HotLeadsService } from 'src/hot-leads/hot-leads.service';
 
 @UseGuards(JwtAuthGuard)
 @Controller('user-leads')
@@ -30,6 +31,7 @@ export class UserLeadsController {
   constructor(
     private readonly service: UserLeadsService,
     private leadService: LeadsService,
+    private hotLeadService: HotLeadsService,
   ) {}
 
   @Post()
@@ -60,6 +62,7 @@ export class UserLeadsController {
   @Post('bulk')
   async createBulk(@Body() body, @Req() req: Request) {
     const { leads, user } = body;
+    let is_hot_lead = false;
 
     const leadIds = leads.map((item) => item?._id).filter((id) => id); // Ensures no undefined/null values
 
@@ -69,12 +72,18 @@ export class UserLeadsController {
         name: item?.name,
         city: item?.city,
         user,
+        is_hot_lead: item?.is_hot_lead ? item?.is_hot_lead : false,
         assigned_by: req.user['username'],
         branch: req.user['branch']['_id'],
       };
     });
     await this.service.create(data);
-    return this.leadService.deleteByIds(leadIds); // No need for await before return
+
+    if (data[0]?.is_hot_lead) {
+      return this.hotLeadService.deleteByIds(leadIds); // No need for await before return
+    } else {
+      return this.leadService.deleteByIds(leadIds); // No need for await before return
+    }
   }
 
   @Get()
@@ -85,6 +94,14 @@ export class UserLeadsController {
   @Get('my-leads')
   async getMyLeads(@Req() req: Request, @Query() query: Record<string, any>) {
     return this.service.getByUserId(req?.user['userId'], query);
+  }
+
+  @Get('my-hot-leads')
+  async getMyHotLeads(
+    @Req() req: Request,
+    @Query() query: Record<string, any>,
+  ) {
+    return this.service.getByUserIdHotLeads(req?.user['userId'], query);
   }
 
   @Get('get-lead-history')
