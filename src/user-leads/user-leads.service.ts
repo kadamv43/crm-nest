@@ -314,7 +314,7 @@ export class UserLeadsService {
     };
   }
 
-  async getStatusCountByUser(params) {
+  async getStatusCountByUserOld(params) {
     let matchStage = {};
 
     if (params.user) {
@@ -348,11 +348,11 @@ export class UserLeadsService {
       ),
     );
 
-    matchStage['$and'] = [
-      {
-        created_at: { $gte: startOfDay, $lte: endOfDay },
-      },
-    ];
+    // matchStage['$and'] = [
+    //   {
+    //     created_at: { $gte: startOfDay, $lte: endOfDay },
+    //   },
+    // ];
 
     const result = await this.model.aggregate([
       { $match: matchStage }, // 🔍 Filter by user if provided
@@ -534,10 +534,251 @@ export class UserLeadsService {
     return result;
   }
 
+  async getStatusCountByUser(params) {
+    let matchStage: any = {};
+
+    if (params.user) {
+      matchStage['user'] = Array.isArray(params.user)
+        ? { $in: params.user.map((id) => new Types.ObjectId(id)) }
+        : new Types.ObjectId(params.user);
+    }
+
+    const now = new Date();
+    const startOfDay = new Date(now.setUTCHours(0, 0, 0, 0));
+    const endOfDay = new Date(now.setUTCHours(23, 59, 59, 999));
+
+    const result = await this.model.aggregate([
+      { $match: matchStage }, // 🔍 Apply user filter if provided
+      {
+        $match: {
+          $or: [
+            { status: 'FRESH' }, // Keep all "FRESH" leads
+            { updated_at: { $gte: startOfDay, $lte: endOfDay } }, // Filter only today's data for all other statuses
+          ],
+        },
+      },
+      {
+        $group: {
+          _id: { user: '$user', status: '$status' },
+          count: { $sum: 1 },
+        },
+      },
+      {
+        $group: {
+          _id: '$_id.user',
+          statuses: {
+            $push: {
+              status: '$_id.status',
+              count: '$count',
+            },
+          },
+        },
+      },
+      {
+        $lookup: {
+          from: 'users',
+          localField: '_id',
+          foreignField: '_id',
+          as: 'userDetails',
+        },
+      },
+      { $unwind: '$userDetails' },
+      {
+        $project: {
+          _id: 0,
+          user: '$_id',
+          userDetails: {
+            username: '$userDetails.username',
+            mobile: '$userDetails.mobile',
+          },
+          status: {
+            total: {
+              $sum: {
+                $map: {
+                  input: '$statuses',
+                  as: 's',
+                  in: {
+                    $cond: [{ $eq: ['$$s.status', 'FRESH'] }, '$$s.count', 0],
+                  },
+                },
+              },
+            },
+            fresh: {
+              $sum: {
+                $map: {
+                  input: '$statuses',
+                  as: 's',
+                  in: {
+                    $cond: [{ $eq: ['$$s.status', 'FRESH'] }, '$$s.count', 0],
+                  },
+                },
+              },
+            },
+            callback: {
+              $sum: {
+                $map: {
+                  input: '$statuses',
+                  as: 's',
+                  in: {
+                    $cond: [
+                      { $eq: ['$$s.status', 'CALLBACK'] },
+                      '$$s.count',
+                      0,
+                    ],
+                  },
+                },
+              },
+            },
+            free_trial: {
+              $sum: {
+                $map: {
+                  input: '$statuses',
+                  as: 's',
+                  in: {
+                    $cond: [
+                      { $eq: ['$$s.status', 'FREE_TRIAL'] },
+                      '$$s.count',
+                      0,
+                    ],
+                  },
+                },
+              },
+            },
+            ringing: {
+              $sum: {
+                $map: {
+                  input: '$statuses',
+                  as: 's',
+                  in: {
+                    $cond: [{ $eq: ['$$s.status', 'RINGING'] }, '$$s.count', 0],
+                  },
+                },
+              },
+            },
+            switched_off: {
+              $sum: {
+                $map: {
+                  input: '$statuses',
+                  as: 's',
+                  in: {
+                    $cond: [
+                      { $eq: ['$$s.status', 'SWITCHED_OFF'] },
+                      '$$s.count',
+                      0,
+                    ],
+                  },
+                },
+              },
+            },
+            dead: {
+              $sum: {
+                $map: {
+                  input: '$statuses',
+                  as: 's',
+                  in: {
+                    $cond: [{ $eq: ['$$s.status', 'DEAD'] }, '$$s.count', 0],
+                  },
+                },
+              },
+            },
+            not_reachable: {
+              $sum: {
+                $map: {
+                  input: '$statuses',
+                  as: 's',
+                  in: {
+                    $cond: [
+                      { $eq: ['$$s.status', 'NOT_REACHABLE'] },
+                      '$$s.count',
+                      0,
+                    ],
+                  },
+                },
+              },
+            },
+            not_interested: {
+              $sum: {
+                $map: {
+                  input: '$statuses',
+                  as: 's',
+                  in: {
+                    $cond: [
+                      { $eq: ['$$s.status', 'NOT_INTERESTED'] },
+                      '$$s.count',
+                      0,
+                    ],
+                  },
+                },
+              },
+            },
+            expected_payment: {
+              $sum: {
+                $map: {
+                  input: '$statuses',
+                  as: 's',
+                  in: {
+                    $cond: [
+                      { $eq: ['$$s.status', 'EXPECTED_PAYMENT'] },
+                      '$$s.count',
+                      0,
+                    ],
+                  },
+                },
+              },
+            },
+            payment_done: {
+              $sum: {
+                $map: {
+                  input: '$statuses',
+                  as: 's',
+                  in: {
+                    $cond: [
+                      { $eq: ['$$s.status', 'PAYMENT_DONE'] },
+                      '$$s.count',
+                      0,
+                    ],
+                  },
+                },
+              },
+            },
+            total_dialed: {
+              $sum: {
+                $map: {
+                  input: '$statuses',
+                  as: 's',
+                  in: {
+                    $cond: [
+                      {
+                        $and: [
+                          { $ne: ['$$s.status', 'FRESH'] },
+                          { $ne: ['$$s.status', 'TOTAL'] },
+                        ],
+                      },
+                      '$$s.count',
+                      0,
+                    ],
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      // 🔥 Sorting by username in ascending order
+      {
+        $sort: { 'userDetails.username': 1 },
+      },
+    ]);
+
+    console.log(result);
+
+    return result;
+  }
+
   async getReports(params) {
     console.log('report', params);
     let matchStage = {};
-    const { from, to, status, size, page } = params;
+    const { from, to, status, size, page, lead_type } = params;
     const skip = page * size;
 
     // Match by user if provided
@@ -568,6 +809,11 @@ export class UserLeadsService {
       matchStage['created_at']['$lte'] = new Date(to);
     }
 
+    if (lead_type && lead_type == 'hot_lead') {
+      matchStage['is_hot_lead'] = true;
+    } else if (lead_type && lead_type == 'normal_lead') {
+      matchStage['is_hot_lead'] = false;
+    }
     console.log('query', matchStage);
 
     const result = await this.model
@@ -596,6 +842,7 @@ export class UserLeadsService {
             mobile: 1,
             name: 1,
             city: 1,
+            is_hot_lead: 1,
             status: 1, // Include status field
             created_at: 1, // Include creation date
           },
@@ -782,9 +1029,76 @@ export class UserLeadsService {
     id: string,
     updatePatientDto: UpdateUserLeadDto,
   ): Promise<UserLead> {
-    if (updatePatientDto.status == 'PAYMENT_DONE') {
+    const updateFields: any = {};
+
+    // ✅ Update top-level fields dynamically (excluding nested ones)
+    Object.keys(updatePatientDto).forEach((key) => {
+      if (!['payment', 'free_trial', 'follow_up'].includes(key)) {
+        updateFields[key] = updatePatientDto[key];
+      }
+    });
+
+    // ✅ Dynamically update only the provided fields inside `payment`
+    if (updatePatientDto.payment) {
+      Object.keys(updatePatientDto.payment).forEach((key) => {
+        if (key === 'payment_date') {
+          const parsedDate = new Date(updatePatientDto.payment[key]);
+          if (!isNaN(parsedDate.getTime())) {
+            updateFields[`payment.${key}`] = parsedDate;
+          }
+        } else {
+          updateFields[`payment.${key}`] = updatePatientDto.payment[key];
+        }
+      });
     }
 
+    // ✅ Dynamically update `free_trial` fields with date conversion
+    if (updatePatientDto.free_trial) {
+      Object.keys(updatePatientDto.free_trial).forEach((key) => {
+        if (key === 'free_trial_date') {
+          const parsedDate = new Date(updatePatientDto.free_trial[key]);
+          if (!isNaN(parsedDate.getTime())) {
+            updateFields[`free_trial.${key}`] = parsedDate;
+          }
+        } else {
+          updateFields[`free_trial.${key}`] = updatePatientDto.free_trial[key];
+        }
+      });
+    }
+
+    // ✅ Dynamically update `follow_up` fields with date conversion
+    if (updatePatientDto.follow_up) {
+      Object.keys(updatePatientDto.follow_up).forEach((key) => {
+        if (key === 'expected_payment_date') {
+          const parsedDate = new Date(updatePatientDto.follow_up[key]);
+          if (!isNaN(parsedDate.getTime())) {
+            updateFields[`follow_up.${key}`] = parsedDate;
+          }
+        } else {
+          updateFields[`follow_up.${key}`] = updatePatientDto.follow_up[key];
+        }
+      });
+    }
+
+    // ✅ Always update the timestamp
+    updateFields.updated_at = new Date();
+
+    // ✅ Perform update using `$set` to **only modify provided fields**
+    const updatedUserLead = await this.model
+      .findByIdAndUpdate(id, { $set: updateFields }, { new: true })
+      .exec();
+
+    if (!updatedUserLead) {
+      throw new NotFoundException(`Patient #${id} not found`);
+    }
+
+    return updatedUserLead;
+  }
+
+  async updateOld(
+    id: string,
+    updatePatientDto: UpdateUserLeadDto,
+  ): Promise<UserLead> {
     if (updatePatientDto?.payment) {
       const paymentDate = updatePatientDto.payment.payment_date;
       if (paymentDate && !(paymentDate instanceof Date)) {
@@ -820,6 +1134,8 @@ export class UserLeadsService {
         }
       }
     }
+
+    updatePatientDto.updated_at = new Date();
 
     const existingPatient = await this.model
       .findByIdAndUpdate(id, updatePatientDto, { new: true })
@@ -964,7 +1280,7 @@ export class UserLeadsService {
       },
       {
         $project: {
-          _id: 0,
+          _id: 1,
           name: 1, // Include the payer's name
           mobile: 1, // Include the payer's mobile
           city: 1, // Include city if available
@@ -972,6 +1288,7 @@ export class UserLeadsService {
           payment_mode: '$payment.payment_mode',
           payment_details: '$payment.payment_details',
           payment_date: '$payment.payment_date',
+          email_status: '$payment.email_status',
           userDetails: {
             username: '$userDetails.username',
             mobile: '$userDetails.mobile',

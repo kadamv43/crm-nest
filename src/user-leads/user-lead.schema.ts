@@ -93,6 +93,7 @@ export class UserLead {
       payment_details: { type: Object, trim: true },
       payment_mode: { type: String, trim: true },
       payment_date: { type: Date },
+      email_status: { type: String, default: 'Not Done' },
     },
   })
   payment: {
@@ -100,6 +101,7 @@ export class UserLead {
     payment_details: object;
     payment_mode: string;
     payment_date: Date;
+    email_status: string;
   };
 
   @Prop({ default: Date.now })
