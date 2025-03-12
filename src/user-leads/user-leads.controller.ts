@@ -67,11 +67,17 @@ export class UserLeadsController {
     const leadIds = leads.map((item) => item?._id).filter((id) => id); // Ensures no undefined/null values
 
     const data = leads.map((item) => {
+      if (item?.payment?.payment_date) {
+        item.payment.payment_date = new Date(item?.payment?.payment_date);
+      }
+
       return {
         mobile: item?.mobile,
         name: item?.name,
         city: item?.city,
         user,
+        status: item?.status,
+        payment: item?.payment,
         is_hot_lead: item?.is_hot_lead ? item?.is_hot_lead : false,
         assigned_by: req.user['username'],
         branch: req.user['branch']['_id'],
@@ -84,6 +90,16 @@ export class UserLeadsController {
     } else {
       return this.leadService.deleteByIds(leadIds); // No need for await before return
     }
+  }
+
+  @Post('delete-bulk')
+  async deleteBulk(@Body() body, @Req() req: Request) {
+    const { leads, user } = body;
+    // let is_hot_lead = false;
+
+    const leadIds = leads.map((item) => item?._id); // Ensures no undefined/null values
+    console.log(leadIds);
+    return this.service.deleteByIds(leadIds); // No need for await before return
   }
 
   @Get()
@@ -102,6 +118,22 @@ export class UserLeadsController {
     @Query() query: Record<string, any>,
   ) {
     return this.service.getByUserIdHotLeads(req?.user['userId'], query);
+  }
+
+  @Get('assigned-hot-leads')
+  async getAssignedHotLeads(
+    @Req() req: Request,
+    @Query() query: Record<string, any>,
+  ) {
+    return this.service.getAssigneddHotLeads(req?.user['userId'], query);
+  }
+
+  @Get('assigned-leads')
+  async getAssignedLeads(
+    @Req() req: Request,
+    @Query() query: Record<string, any>,
+  ) {
+    return this.service.getAssignedLeads(req?.user['userId'], query);
   }
 
   @Get('get-lead-history')

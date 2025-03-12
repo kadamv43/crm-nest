@@ -979,6 +979,102 @@ export class UserLeadsService {
     return { data: patients, total: totalRecords };
   }
 
+  async getAssigneddHotLeads(id: string, params) {
+    const size = params.size;
+    const skip = params.page * params.size;
+
+    let query = {};
+
+    query = { is_hot_lead: true, status: 'FRESH' };
+
+    const now = new Date();
+
+    const startOfDay = new Date(
+      Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate(),
+        0,
+        0,
+        0,
+        0,
+      ),
+    );
+    const endOfDay = new Date(
+      Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate(),
+        23,
+        59,
+        59,
+        999,
+      ),
+    );
+
+    // if (params.status == 'FRESH') {
+    //   query['created_at'] = { $gte: startOfDay, $lte: endOfDay };
+    // }
+
+    const patients = await this.model
+      .find(query)
+      .populate('user')
+      .sort({ created_at: 'desc' })
+      .skip(skip)
+      .limit(size)
+      .exec();
+    const totalRecords = await this.model.countDocuments(query).exec();
+    return { data: patients, total: totalRecords };
+  }
+
+  async getAssignedLeads(id: string, params) {
+    const size = params.size;
+    const skip = params.page * params.size;
+
+    let query = {};
+
+    query = { is_hot_lead: false, status: 'FRESH' };
+
+    const now = new Date();
+
+    const startOfDay = new Date(
+      Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate(),
+        0,
+        0,
+        0,
+        0,
+      ),
+    );
+    const endOfDay = new Date(
+      Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate(),
+        23,
+        59,
+        59,
+        999,
+      ),
+    );
+
+    // if (params.status == 'FRESH') {
+    //   query['created_at'] = { $gte: startOfDay, $lte: endOfDay };
+    // }
+
+    const patients = await this.model
+      .find(query)
+      .populate('user')
+      .sort({ created_at: 'desc' })
+      .skip(skip)
+      .limit(size)
+      .exec();
+    const totalRecords = await this.model.countDocuments(query).exec();
+    return { data: patients, total: totalRecords };
+  }
+
   async getByUserIdFollowUp(id: string, params) {
     const size = params.size;
     const skip = params.page * params.size;
@@ -1281,9 +1377,10 @@ export class UserLeadsService {
       {
         $project: {
           _id: 1,
-          name: 1, // Include the payer's name
+
           mobile: 1, // Include the payer's mobile
           city: 1, // Include city if available
+          name: '$payment.name', // Include the payer's name
           payment_amount: '$payment.payment_amount',
           payment_mode: '$payment.payment_mode',
           payment_details: '$payment.payment_details',
@@ -1307,6 +1404,11 @@ export class UserLeadsService {
       totalPayment: overallTotal,
       payments: result,
     };
+  }
+
+  async deleteByIds(ids: string[]): Promise<any> {
+    const objectIds = ids.map((id) => new Types.ObjectId(id)); // Convert to ObjectId
+    return await this.model.deleteMany({ _id: { $in: objectIds } });
   }
 
   async getTodayTotalPayment(userId: string) {
