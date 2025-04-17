@@ -543,17 +543,45 @@ export class UserLeadsService {
         : new Types.ObjectId(params.user);
     }
 
+    const page = parseInt(params.page);
+    const size = parseInt(params.size);
+    const skip = page * size;
+
     const now = new Date();
     const startOfDay = new Date(now.setUTCHours(0, 0, 0, 0));
     const endOfDay = new Date(now.setUTCHours(23, 59, 59, 999));
 
-    const result = await this.model.aggregate([
-      { $match: matchStage }, // 🔍 Apply user filter if provided
+    // First: Get the total count of unique users before pagination
+    const totalResult = await this.model.aggregate([
+      { $match: matchStage },
       {
         $match: {
           $or: [
-            { status: 'FRESH' }, // Keep all "FRESH" leads
-            { updated_at: { $gte: startOfDay, $lte: endOfDay } }, // Filter only today's data for all other statuses
+            { status: 'FRESH' },
+            { updated_at: { $gte: startOfDay, $lte: endOfDay } },
+          ],
+        },
+      },
+      {
+        $group: {
+          _id: '$user',
+        },
+      },
+      {
+        $count: 'total',
+      },
+    ]);
+
+    const totalRecords = totalResult.length > 0 ? totalResult[0].total : 0;
+
+    // Then: Fetch paginated data
+    const result = await this.model.aggregate([
+      { $match: matchStage },
+      {
+        $match: {
+          $or: [
+            { status: 'FRESH' },
+            { updated_at: { $gte: startOfDay, $lte: endOfDay } },
           ],
         },
       },
@@ -764,15 +792,15 @@ export class UserLeadsService {
           },
         },
       },
-      // 🔥 Sorting by username in ascending order
-      {
-        $sort: { 'userDetails.username': 1 },
-      },
+      { $sort: { 'userDetails.username': 1 } },
+      { $skip: skip },
+      { $limit: size },
     ]);
 
-    console.log(result);
-
-    return result;
+    return {
+      total: totalRecords,
+      result: result,
+    };
   }
 
   async getReports(params) {
@@ -1339,6 +1367,13 @@ export class UserLeadsService {
       };
     }
 
+    const page = parseInt(params.page);
+    const size = parseInt(params.size);
+    const skip = page * size;
+
+    console.log('page', page);
+    console.log('size', size);
+
     const startOfMonth = new Date(
       new Date().getFullYear(),
       new Date().getMonth(),
@@ -1353,54 +1388,56 @@ export class UserLeadsService {
       59,
     );
 
-    const result = await this.model.aggregate([
-      {
-        $match: {
-          ...matchStage,
-          'payment.payment_date': {
-            $gte: startOfMonth,
-            $lte: endOfMonth,
-          },
-        },
+    const matchQuery = {
+      ...matchStage,
+      'payment.payment_date': {
+        $gte: startOfMonth,
+        $lte: endOfMonth,
       },
-      {
-        $lookup: {
-          from: 'users', // Assuming your user collection is 'users'
-          localField: 'user',
-          foreignField: '_id',
-          as: 'userDetails',
-        },
-      },
-      {
-        $unwind: '$userDetails', // Convert user array to object
-      },
-      {
-        $project: {
-          _id: 1,
+    };
 
-          mobile: 1, // Include the payer's mobile
-          city: 1, // Include city if available
-          name: '$payment.name', // Include the payer's name
-          payment_amount: '$payment.payment_amount',
-          payment_mode: '$payment.payment_mode',
-          payment_details: '$payment.payment_details',
-          payment_date: '$payment.payment_date',
-          email_status: '$payment.email_status',
-          userDetails: {
-            username: '$userDetails.username',
-            mobile: '$userDetails.mobile',
+    const [result, totalCountArr] = await Promise.all([
+      this.model.aggregate([
+        { $match: matchQuery },
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'user',
+            foreignField: '_id',
+            as: 'userDetails',
           },
         },
-      },
+        { $unwind: '$userDetails' },
+        {
+          $project: {
+            _id: 1,
+            mobile: 1,
+            city: 1,
+            name: '$payment.name',
+            payment_amount: '$payment.payment_amount',
+            payment_mode: '$payment.payment_mode',
+            payment_details: '$payment.payment_details',
+            payment_date: '$payment.payment_date',
+            email_status: '$payment.email_status',
+            userDetails: {
+              username: '$userDetails.username',
+              mobile: '$userDetails.mobile',
+            },
+          },
+        },
+        { $skip: skip },
+        { $limit: size },
+      ]),
+      this.model.countDocuments(matchQuery),
     ]);
 
-    // Calculate overall total payment sum
     const overallTotal = result.reduce(
       (sum, payment) => sum + Number(payment.payment_amount),
       0,
     );
 
     return {
+      total: totalCountArr,
       totalPayment: overallTotal,
       payments: result,
     };

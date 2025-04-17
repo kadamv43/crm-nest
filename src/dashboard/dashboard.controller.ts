@@ -27,6 +27,8 @@ export class DashboardController {
       achieved = (
         await this.userLeadsService.getCurrentMonthTeamPaymentDone({
           user: userIds,
+          page: query.page,
+          size: query.size,
         })
       )?.totalPayment;
     } else if (user.role == 'teamlead') {
@@ -41,6 +43,8 @@ export class DashboardController {
       achieved = (
         await this.userLeadsService.getCurrentMonthTeamPaymentDone({
           user: teamUserIds,
+          page: query.page,
+          size: query.size,
         })
       )?.totalPayment;
     } else {
@@ -48,6 +52,8 @@ export class DashboardController {
       achieved = (
         await this.userLeadsService.getCurrentMonthTeamPaymentDone({
           user: [query?.user],
+          page: query.page,
+          size: query.size,
         })
       )?.totalPayment;
     }
@@ -105,6 +111,8 @@ export class DashboardController {
       });
       return await this.userLeadsService.getCurrentMonthTeamPaymentDone({
         user: userIds,
+        page: query.page,
+        size: query.size,
       });
     } else if (user.role == 'teamlead') {
       let teamMembers = await this.userService.findByTeamlead(query?.user);
@@ -115,10 +123,14 @@ export class DashboardController {
 
       return await this.userLeadsService.getCurrentMonthTeamPaymentDone({
         user: teamUserIds,
+        page: query.page,
+        size: query.size,
       });
     } else {
       return await this.userLeadsService.getCurrentMonthTeamPaymentDone({
         user: [query?.user],
+        page: query.page,
+        size: query.size,
       });
     }
   }
@@ -132,21 +144,37 @@ export class DashboardController {
       const userIds = users.map((user: any) => {
         return user?._id;
       });
-      return this.userLeadsService.getStatusCountByUser({ user: userIds });
+      return this.userLeadsService.getStatusCountByUser({
+        user: userIds,
+        page: query.page,
+        size: query.size,
+      });
     } else if (user.role == 'admin') {
       const users = await this.userService.findByBranch(user?.branch);
       const userIds = users.map((user: any) => {
         return user?._id;
       });
-      return this.userLeadsService.getStatusCountByUser({ user: userIds });
+      return this.userLeadsService.getStatusCountByUser({
+        user: userIds,
+        page: query.page,
+        size: query.size,
+      });
     } else if (user.role == 'teamlead') {
       const users = await this.userService.findByTeamlead(query?.user);
       const userIds = users.map((user: any) => {
         return user?._id;
       });
-      return this.userLeadsService.getStatusCountByUser({ user: userIds });
+      return this.userLeadsService.getStatusCountByUser({
+        user: userIds,
+        page: query.page,
+        size: query.size,
+      });
     } else {
-      return this.userLeadsService.getStatusCountByUser({ user: query?.user });
+      return this.userLeadsService.getStatusCountByUser({
+        user: query?.user,
+        page: query.page,
+        size: query.size,
+      });
     }
   }
 
