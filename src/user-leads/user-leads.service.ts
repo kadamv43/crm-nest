@@ -69,6 +69,10 @@ export class UserLeadsService {
   }
 
   async getFreeTrialData(params) {
+    console.log(params);
+    const size = params.size;
+    const skip = params.page * params.size;
+
     let query = {};
     let matchStage = {};
 
@@ -113,6 +117,8 @@ export class UserLeadsService {
       .find(matchStage)
       .populate('user')
       .sort({ created_at: 'desc' })
+      .skip(skip)
+      .limit(size)
       .exec();
 
     const totalRecords = await this.model.countDocuments(matchStage).exec();
@@ -1287,8 +1293,37 @@ export class UserLeadsService {
     return deletedPatient;
   }
 
-  async getLeadHistory(query: Record<string, any>): Promise<UserLead[]> {
-    return this.model.find(query).exec();
+  async getLeadHistory(params: Record<string, any>) {
+    const page = parseInt(params.page);
+    const size = parseInt(params.size);
+    const skip = page * size;
+
+    console.log('page', page);
+    console.log('size', size);
+
+    console.log(params);
+    if (params.mobile) {
+      const isValidMobile = /^\d{10}$/.test(params.mobile);
+      if (!isValidMobile) {
+        throw new BadRequestException('Invalid Mobile Number');
+      }
+    }
+
+    if (params.mobile == '') {
+      throw new BadRequestException('Please enter Mobile number');
+    }
+
+    let query = { mobile: params.mobile };
+
+    let data = await this.model
+      .find(query)
+      .populate('user')
+      .skip(skip)
+      .limit(size)
+      .exec();
+
+    const totalRecords = await this.model.countDocuments(query).exec();
+    return { data: data, total: totalRecords };
   }
 
   async globalSearch(query: string): Promise<UserLead[]> {

@@ -73,6 +73,7 @@ export class DashboardController {
     @Req() req: Request,
     @Query() query: Record<string, any>,
   ) {
+    console.log(query);
     const user = await this.userService.findOne(query?.user);
 
     if (user.role == 'superadmin') {
@@ -80,21 +81,38 @@ export class DashboardController {
       const userIds = users.map((user: any) => {
         return user?._id;
       });
-      return this.userLeadsService.getFreeTrialData({ user: userIds });
+      return this.userLeadsService.getFreeTrialData({
+        user: userIds,
+        page: query?.page,
+        size: query?.size,
+      });
     } else if (user.role == 'admin') {
       const users = await this.userService.findByBranch(user?.branch);
       const userIds = users.map((user: any) => {
         return user?._id;
       });
-      return this.userLeadsService.getFreeTrialData({ user: userIds });
+      return this.userLeadsService.getFreeTrialData({
+        user: userIds,
+        page: query?.page,
+        size: query?.size,
+      });
     } else if (user.role == 'teamlead') {
       const users = await this.userService.findByTeamlead(query?.user);
       const userIds = users.map((user: any) => {
         return user?._id;
       });
-      return this.userLeadsService.getFreeTrialData({ user: userIds });
+      userIds.push(query?.user);
+      return this.userLeadsService.getFreeTrialData({
+        user: userIds,
+        page: query?.page,
+        size: query?.size,
+      });
     } else {
-      return this.userLeadsService.getFreeTrialData({ user: [query?.user] });
+      return this.userLeadsService.getFreeTrialData({
+        user: [query?.user],
+        page: query?.page,
+        size: query?.size,
+      });
     }
   }
 
