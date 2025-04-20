@@ -1161,6 +1161,7 @@ export class UserLeadsService {
   ): Promise<UserLead> {
     const updateFields: any = {};
 
+    console.log(updatePatientDto);
     // ✅ Update top-level fields dynamically (excluding nested ones)
     Object.keys(updatePatientDto).forEach((key) => {
       if (!['payment', 'free_trial', 'follow_up'].includes(key)) {
@@ -1448,6 +1449,7 @@ export class UserLeadsService {
             _id: 1,
             mobile: 1,
             city: 1,
+            status: 1,
             name: '$payment.name',
             payment_amount: '$payment.payment_amount',
             payment_mode: '$payment.payment_mode',

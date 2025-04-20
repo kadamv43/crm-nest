@@ -14,6 +14,9 @@ export class UserLead {
   name?: string;
 
   @Prop({ required: false, trim: true })
+  city?: string;
+
+  @Prop({ required: false, trim: true })
   assigned_by?: string;
 
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Branch', required: true })

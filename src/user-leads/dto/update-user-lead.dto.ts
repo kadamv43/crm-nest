@@ -12,6 +12,10 @@ export class UpdateUserLeadDto {
 
   @IsString()
   @IsOptional()
+  city: string;
+
+  @IsString()
+  @IsOptional()
   assigned_by: string;
 
   @IsString()
