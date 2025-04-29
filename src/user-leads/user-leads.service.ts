@@ -935,9 +935,9 @@ export class UserLeadsService {
       ),
     );
 
-    // if (params.status == 'FRESH') {
-    //   query['created_at'] = { $gte: startOfDay, $lte: endOfDay };
-    // }
+    if (params.status == 'FRESH') {
+      query['is_hot_lead'] = false;
+    }
 
     if (params.status == 'FREE_TRIAL') {
       query['free_trial.free_trial_date'] = {
