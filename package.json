@@ -1,5 +1,6 @@
 {
   "name": "node-api",
+  "main": "electron/main.js",
   "version": "0.0.1",
   "description": "",
   "author": "",
@@ -17,7 +18,9 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "jest --config ./test/jest-e2e.json"
+    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "start:electron": "electron .",
+    "make:exe": "npm run build && electron-builder --win"
   },
   "dependencies": {
     "@nestjs/axios": "^3.0.3",
@@ -78,7 +81,24 @@
     "ts-loader": "^9.4.3",
     "ts-node": "^10.9.1",
     "tsconfig-paths": "^4.2.0",
-    "typescript": "^5.1.3"
+    "typescript": "^5.1.3",
+    "electron": "^29.0.0",
+    "electron-builder": "^24.0.0"
+  },
+  "build": {
+    "appId": "com.example.crmbackend",
+    "productName": "CRM Backend",
+    "files": [
+      "dist/**/*",
+      "node_modules/**/*",
+      "electron/main.js",
+      "index.html",
+      "package.json"
+    ],
+    "extraResources": [],
+    "win": {
+      "target": "nsis"
+    }
   },
   "jest": {
     "moduleFileExtensions": [

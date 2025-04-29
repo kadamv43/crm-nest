@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NestJS Control</title>
+</head>
+
+<body>
+    <h1>Control NestJS Server</h1>
+    <button id="startBtn">Start Server</button>
+    <button id="stopBtn">Stop Server</button>
+
+    <script>
+        const { ipcRenderer } = require('electron');
+
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+
+        // Start the NestJS server
+        startBtn.addEventListener('click', async () => {
+            await ipcRenderer.invoke('start-nestjs');
+        });
+
+        // Stop the NestJS server
+        stopBtn.addEventListener('click', async () => {
+            await ipcRenderer.invoke('stop-nestjs');
+        });
+    </script>
+</body>
+
+</html>
