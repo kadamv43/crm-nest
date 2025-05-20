@@ -809,10 +809,19 @@ export class UserLeadsService {
     };
   }
 
-  async getReports(params) {
+  async getReports(params: {
+    from?: string;
+    to?: string;
+    status?: string;
+    size?: number;
+    page?: number;
+    lead_type?: string;
+    excel?: boolean;
+    user?: string | string[];
+  }) {
     console.log('report', params);
-    let matchStage = {};
-    const { from, to, status, size, page, lead_type } = params;
+    let matchStage: Record<string, any> = {};
+    const { from, to, status, size = 10, page = 0, lead_type, excel } = params;
     const skip = page * size;
 
     // Match by user if provided
@@ -850,46 +859,59 @@ export class UserLeadsService {
     }
     console.log('query', matchStage);
 
-    const result = await this.model
-      .aggregate([
-        { $match: matchStage }, // Match the filters based on user, status, date, etc.
-        {
-          $lookup: {
-            from: 'users',
-            localField: 'user',
-            foreignField: '_id',
-            as: 'userDetails',
-          },
+    // Create the base aggregation pipeline with proper typing
+    const aggregationPipeline: any[] = [
+      { $match: matchStage },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'user',
+          foreignField: '_id',
+          as: 'userDetails',
         },
-        { $unwind: '$userDetails' }, // Unwind userDetails for each report
-        {
-          $project: {
-            _id: 1,
-            user: '$user',
-            userDetails: {
-              username: '$userDetails.username',
-              mobile: '$userDetails.mobile',
-            },
-            free_trial: 1,
-            follow_up: 1,
-            payment: 1,
-            mobile: 1,
-            name: 1,
-            city: 1,
-            is_hot_lead: 1,
-            status: 1, // Include status field
-            created_at: 1, // Include creation date
+      },
+      { $unwind: '$userDetails' },
+      {
+        $project: {
+          _id: 1,
+          user: '$user',
+          userDetails: {
+            username: '$userDetails.username',
+            mobile: '$userDetails.mobile',
           },
+          free_trial: 1,
+          follow_up: 1,
+          payment: 1,
+          mobile: 1,
+          name: 1,
+          city: 1,
+          is_hot_lead: 1,
+          status: 1,
+          created_at: 1,
         },
-      ])
-      .skip(skip)
-      .sort({ created_at: 'desc' })
-      .limit(Number(size))
-      .exec();
+      },
+      { $sort: { created_at: 'desc' } },
+    ];
 
-    const totalRecords = await this.model.countDocuments(matchStage).exec();
-    return { data: result, total: totalRecords };
-    // return result;
+    // If excel param is present, skip pagination
+    if (excel) {
+      const result = await this.model
+        .aggregate<any>(aggregationPipeline)
+        .exec();
+      const totalRecords = await this.model.countDocuments(matchStage).exec();
+      return { data: result, total: totalRecords };
+    } else {
+      // Add pagination for non-excel requests
+      const paginatedPipeline = [
+        ...aggregationPipeline,
+        { $skip: skip },
+        { $limit: Number(size) },
+      ];
+
+      const result = await this.model.aggregate<any>(paginatedPipeline).exec();
+      const totalRecords = await this.model.countDocuments(matchStage).exec();
+      return { data: result, total: totalRecords };
+    }
   }
 
   getEndDate(startDate) {
