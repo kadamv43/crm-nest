@@ -890,7 +890,7 @@ export class UserLeadsService {
           created_at: 1,
         },
       },
-      { $sort: { created_at: 'desc' } },
+      { $sort: { created_at: -1 } }, // Changed "desc" to -1 for descending
     ];
 
     // If excel param is present, skip pagination
