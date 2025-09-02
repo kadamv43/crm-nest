@@ -50,7 +50,7 @@ export class HotLeadsService {
 
     const patients = await this.model
       .find(query)
-      .sort({ patient_number: 'desc' })
+      .sort({ created_at: 'desc' })
       .skip(skip)
       .limit(size)
       .exec();
