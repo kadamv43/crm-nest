@@ -10,6 +10,7 @@ import {
   Post,
   Put,
   Query,
+  Req,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
@@ -64,5 +65,15 @@ export class HotLeadsController {
     const jsonData = XLSX.utils.sheet_to_json(sheet);
     console.log(jsonData);
     return await this.service.insertData(jsonData);
+  }
+
+  @Post('delete-bulk')
+  async deleteBulk(@Body() body, @Req() req: Request) {
+    const { leads, user } = body;
+    // let is_hot_lead = false;
+
+    const leadIds = leads.map((item) => item?._id); // Ensures no undefined/null values
+    console.log(leadIds);
+    return this.service.deleteByIds(leadIds); // No need for await before return
   }
 }
