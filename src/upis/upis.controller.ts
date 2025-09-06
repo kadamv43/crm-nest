@@ -31,7 +31,7 @@ export class UpisController {
 
   @Get()
   async findAll(@Query() query: Record<string, any>, @Req() req: Request) {
-    if (req.user['role'] == 'admin') {
+     if (req.user['role'] != 'superadmin') {
       query.branch = req.user['branch']['_id'];
     }
     return this.service.findAll(query);
