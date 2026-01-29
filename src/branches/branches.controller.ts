@@ -14,7 +14,6 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { BranchesService } from './branches.service';
-import { UpdateBlogDto } from 'src/blog/dto/update-blog.dto';
 import { UpdateBranchDto } from './dto/update-branch.dto';
 import { JwtAuthGuard } from 'src/auth/guards/jwt.guard';
 import { Request } from 'express';

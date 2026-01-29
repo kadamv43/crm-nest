@@ -6,7 +6,6 @@ import {
 import { AuthPayloadDto } from './dto/auth.dto';
 import { JwtService } from '@nestjs/jwt';
 import { UsersService } from 'src/users/users.service';
-import { PatientsService } from 'src/patients/patients.service';
 import * as bcrypt from 'bcrypt';
 import { Branch } from 'src/branches/branch.schema';
 import { Role } from './roles.enum';
@@ -16,7 +15,6 @@ export class AuthService {
   constructor(
     private jwtService: JwtService,
     private usersService: UsersService,
-    private patientService: PatientsService,
   ) {}
 
   async validateUser(username: string, password: string) {
@@ -27,13 +25,6 @@ export class AuthService {
     throw new UnauthorizedException('Invalid credentials');
   }
 
-  async validatePatient(mobile: string, otp: string) {
-    const patient = await this.patientService.findByOne({ mobile });
-    if (patient && otp === '1234') {
-      return patient;
-    }
-    throw new UnauthorizedException('Invalid OTP');
-  }
 
   async loginUser(user: any) {
     const payload = {

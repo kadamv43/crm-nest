@@ -8,8 +8,7 @@ import { RolesGuard } from './guards/roles.guard';
 import { UsersModule } from 'src/users/users.module';
 import { UserGuard } from './guards/user.guad';
 import { PatientGuard } from './guards/patient.guard';
-import { PatientsService } from 'src/patients/patients.service';
-import { PatientsModule } from 'src/patients/patients.module';
+
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { HttpModule } from '@nestjs/axios';
 import { OtpModule } from 'src/otp/otp.module';
@@ -22,7 +21,6 @@ import { OtpModule } from 'src/otp/otp.module';
       signOptions: { expiresIn: '10h' },
     }),
     UsersModule,
-    PatientsModule,
     OtpModule,
     HttpModule
   ],

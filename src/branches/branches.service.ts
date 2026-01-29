@@ -2,7 +2,6 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Branch } from './branch.schema';
-import { UpdateBlogDto } from 'src/blog/dto/update-blog.dto';
 import { UpdateBranchDto } from './dto/update-branch.dto';
 
 @Injectable()
