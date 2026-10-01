@@ -855,7 +855,7 @@ export class UserLeadsService {
     if (lead_type && lead_type == 'hot_lead') {
       matchStage['is_hot_lead'] = true;
     } else if (lead_type && lead_type == 'normal_lead') {
-      matchStage['is_hot_lead'] = false;
+      matchStage['is_hot_lead'] = { $ne: true }; // also matches leads without the flag
     }
     console.log('query', matchStage);
 
@@ -870,7 +870,7 @@ export class UserLeadsService {
           as: 'userDetails',
         },
       },
-      { $unwind: '$userDetails' },
+      { $unwind: { path: '$userDetails', preserveNullAndEmptyArrays: true } },
       {
         $project: {
           _id: 1,

@@ -219,6 +219,8 @@ export class DashboardController {
       const userIds = users.map((user: any) => {
         return user?._id;
       });
+      // A team lead's report includes their own leads, like the other dashboard views.
+      userIds.push(query?.user);
       query['user'] = userIds;
       return this.userLeadsService.getReports(query);
     } else {
