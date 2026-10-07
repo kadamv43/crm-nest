@@ -1,7 +1,8 @@
 import mongoose, { Model, Types } from 'mongoose';
 import { UserLead, UserLeadSchema } from './user-lead.schema';
 import { User, UserSchema } from 'src/users/user.schema';
-import { UserLeadsService } from './user-leads.service';
+import { BadRequestException } from '@nestjs/common';
+import { MAX_REPORT_EXPORT_ROWS, UserLeadsService } from './user-leads.service';
 
 // Runs against a throwaway MongoDB. Set TEST_MONGO_URI (e.g.
 // mongodb://127.0.0.1:27099/crm_report_test); the suite is skipped otherwise.
@@ -191,5 +192,57 @@ describeDb('UserLeadsService.getReports', () => {
     const paid = res.data.find((d: any) => d.mobile === '2');
     expect(paid.payment.payment_mode).toBe('CASH');
     expect(paid.userDetails.username).toBe('emp1');
+  });
+
+  describe('export size limit', () => {
+    const bulk = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({
+        branch,
+        mobile: String(i),
+        user: emp1,
+        status: 'FRESH',
+        is_hot_lead: false,
+        created_at: day('2025-02-01T00:00:00Z'),
+      }));
+
+    it('limit is 50,000 rows', () => {
+      expect(MAX_REPORT_EXPORT_ROWS).toBe(50000);
+    });
+
+    it('exports exactly the limit, but rejects one row more', async () => {
+      await leadModel.deleteMany({});
+      await leadModel.collection.insertMany(bulk(MAX_REPORT_EXPORT_ROWS) as any);
+
+      const atLimit = await service.getReports({
+        user: emp1.toString(),
+        excel: true,
+      });
+      expect(atLimit.data.length).toBe(MAX_REPORT_EXPORT_ROWS);
+
+      await leadModel.collection.insertMany(bulk(1) as any);
+      await expect(
+        service.getReports({ user: emp1.toString(), excel: true }),
+      ).rejects.toThrow(BadRequestException);
+      await expect(
+        service.getReports({ user: emp1.toString(), excel: true }),
+      ).rejects.toThrow(/limited to 50,000 rows but this report has 50,001/);
+
+      // normal (paginated) view is not affected by the export limit
+      const page = await service.getReports({
+        user: emp1.toString(),
+        page: 0,
+        size: 10,
+      });
+      expect(page.data.length).toBe(10);
+      expect(page.total).toBe(MAX_REPORT_EXPORT_ROWS + 1);
+
+      // narrowing the filters brings it back under the limit
+      const narrowed = await service.getReports({
+        user: emp1.toString(),
+        excel: true,
+        from: '2025-03-01T00:00:00.000Z',
+      });
+      expect(narrowed.data.length).toBe(0);
+    }, 120000);
   });
 });

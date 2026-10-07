@@ -14,6 +14,9 @@ import { types } from 'util';
 import { iif } from 'rxjs';
 import { LeadsService } from 'src/leads/leads.service';
 
+// Largest number of rows a single report export may return.
+export const MAX_REPORT_EXPORT_ROWS = 50000;
+
 @Injectable()
 export class UserLeadsService {
   constructor(
@@ -895,10 +898,15 @@ export class UserLeadsService {
 
     // If excel param is present, skip pagination
     if (excel) {
+      const totalRecords = await this.model.countDocuments(matchStage).exec();
+      if (totalRecords > MAX_REPORT_EXPORT_ROWS) {
+        throw new BadRequestException(
+          `Export is limited to ${MAX_REPORT_EXPORT_ROWS.toLocaleString('en-US')} rows but this report has ${totalRecords.toLocaleString('en-US')}. Narrow the filters and try again.`,
+        );
+      }
       const result = await this.model
         .aggregate<any>(aggregationPipeline)
         .exec();
-      const totalRecords = await this.model.countDocuments(matchStage).exec();
       return { data: result, total: totalRecords };
     } else {
       // Add pagination for non-excel requests
