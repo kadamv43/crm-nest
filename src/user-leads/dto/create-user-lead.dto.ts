@@ -13,6 +13,11 @@ export class CreateUserLeadDto {
   @IsNotEmpty()
   mobile: string;
 
+  // set by the server from the mobile; sent by the client only when it already knows it
+  @IsString()
+  @IsOptional()
+  contact?: string;
+
   @IsString()
   @IsOptional()
   name: string;

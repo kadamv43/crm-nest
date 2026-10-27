@@ -1,67 +1,50 @@
-// src/patients/patients.service.ts
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { Model } from 'mongoose';
 import { Lead } from './lead.schema';
-import { CreateLeadDto } from './dto/create-lead.dto';
 import { UpdateLeadDto } from './dto/update-lead.dto';
+import {
+  ContactsService,
+  IngestSummary,
+  RawLeadRow,
+} from 'src/contacts/contacts.service';
+import {
+  deletePoolRows,
+  getPoolRow,
+  listPool,
+  removePoolRow,
+  updatePoolRow,
+} from 'src/contacts/pool.helper';
 
+/**
+ * The company's pool of uploaded numbers waiting to be handed to staff.
+ * Every row points at a contact; a number can wait here only once.
+ */
 @Injectable()
 export class LeadsService {
-  prefix = 'PATIENT-';
-  constructor(@InjectModel(Lead.name) private readonly model: Model<Lead>) {}
+  constructor(
+    @InjectModel(Lead.name) private readonly model: Model<Lead>,
+    private readonly contacts: ContactsService,
+  ) {}
 
-  async create(createDto: CreateLeadDto[]) {
-    // const { mobile } = createDto;
-    // const existingPatient = await this.model.findOne({ mobile }).exec();
-
-    // if (existingPatient) {
-    //   return existingPatient;
-    // }
-    return await this.model.insertMany(createDto);
-    // const createdPatient = new this.model(createDto);
+  /** Daily upload: paste box or Excel rows. */
+  async ingest(
+    ctx: { branch: string; uploadedBy?: string },
+    rows: RawLeadRow[],
+  ): Promise<IngestSummary> {
+    return this.contacts.ingestIntoPool(this.model, ctx, rows);
   }
 
-  async deleteByIds(ids: string[]): Promise<any> {
-    const objectIds = ids.map((id) => new Types.ObjectId(id)); // Convert to ObjectId
-    return await this.model.deleteMany({ _id: { $in: objectIds } });
+  async deleteByIds(ids: string[], branch?: string): Promise<any> {
+    return deletePoolRows(this.model, ids, branch);
   }
 
-  async findAll(params) {
-    const size = params.size;
-    const skip = params.page * params.size;
-
-    let query = {};
-    if (params.q) {
-      const regex = new RegExp(params.q, 'i'); // 'i' makes it case-insensitive
-
-      query = {
-        $or: [
-          { patient_number: !isNaN(params.q) ? Number(params.q) : 0 },
-          { first_name: { $regex: regex } },
-          { last_name: { $regex: regex } },
-          { email: { $regex: regex } },
-          { mobile: { $regex: regex } },
-        ],
-      };
-    }
-
-    const patients = await this.model
-      .find(query)
-      .sort({ patient_number: 'desc' })
-      .skip(skip)
-      .limit(size)
-      .exec();
-    const totalRecords = await this.model.countDocuments().exec();
-    return { data: patients, total: totalRecords };
+  async findAll(params: Record<string, any>, branch?: string) {
+    return listPool(this.model, params, branch);
   }
 
-  async getById(id: string): Promise<Lead> {
-    const patient = await this.model.findById(id).exec();
-    if (!patient) {
-      throw new NotFoundException(`Patient #${id} not found`);
-    }
-    return patient;
+  async getById(id: string, branch?: string): Promise<Lead> {
+    return getPoolRow(this.model, id, branch);
   }
 
   async findBy(query: Record<string, any>): Promise<Lead[]> {
@@ -72,55 +55,15 @@ export class LeadsService {
     return this.model.findOne(query).exec();
   }
 
-  async update(id: string, updatePatientDto: UpdateLeadDto): Promise<Lead> {
-    const existingPatient = await this.model
-      .findByIdAndUpdate(id, updatePatientDto, { new: true })
-      .exec();
-    if (!existingPatient) {
-      throw new NotFoundException(`Patient #${id} not found`);
-    }
-    return existingPatient;
+  async update(
+    id: string,
+    dto: UpdateLeadDto,
+    branch?: string,
+  ): Promise<Lead> {
+    return updatePoolRow(this.model, this.contacts, id, dto, branch);
   }
 
-  async insertData(data: any[]): Promise<any> {
-    try {
-      const insertedData = await this.model.insertMany(data);
-      return { message: 'Data inserted successfully', insertedData };
-    } catch (error) {
-      throw new Error(`Failed to insert data: ${error.message}`);
-    }
-  }
-
-  async remove(id: string): Promise<Lead> {
-    const deletedPatient = await this.model.findByIdAndDelete(id).exec();
-    if (!deletedPatient) {
-      throw new NotFoundException(`Patient #${id} not found`);
-    }
-    return deletedPatient;
-  }
-
-  async globalSearch(query: string): Promise<Lead[]> {
-    const searchRegex = new RegExp(query, 'i'); // 'i' makes it case insensitive
-    return this.model
-      .find({
-        $or: [
-          { first_name: searchRegex },
-          { last_name: searchRegex },
-          { email: searchRegex },
-          { mobile: searchRegex },
-        ],
-      })
-      .exec();
-  }
-
-  async importData(jsonData) {
-    for (const data of jsonData) {
-      const item = new this.model({
-        mobile: data['mobile'],
-        name: data['name'],
-        city: data['city'],
-      });
-      await item.save();
-    }
+  async remove(id: string, branch?: string): Promise<Lead> {
+    return removePoolRow(this.model, id, branch);
   }
 }

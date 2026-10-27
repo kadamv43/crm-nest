@@ -7,9 +7,11 @@ import { LeadsService } from 'src/leads/leads.service';
 import { LeadsModule } from 'src/leads/leads.module';
 import { HotLeadsService } from 'src/hot-leads/hot-leads.service';
 import { HotLeadsModule } from 'src/hot-leads/hot-leads.module';
+import { ContactsModule } from 'src/contacts/contacts.module';
 
 @Module({
   imports: [
+    ContactsModule,
     MongooseModule.forFeature([
       { name: UserLead.name, schema: UserLeadSchema },
     ]),

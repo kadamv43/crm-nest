@@ -17,7 +17,8 @@ import {
 } from '@nestjs/common';
 
 import { FileInterceptor } from '@nestjs/platform-express';
-import * as XLSX from 'xlsx';
+import { readSheetRows, rowsFromPastedText } from 'src/common/excel.util';
+import { requestContext, scopedBranch } from 'src/common/request-context';
 import { UserLeadsService } from './user-leads.service';
 import { UpdateUserLeadDto } from './dto/update-user-lead.dto';
 import { Request } from 'express';
@@ -34,37 +35,28 @@ export class UserLeadsController {
     private hotLeadService: HotLeadsService,
   ) {}
 
+  // Pasted numbers (one per line) handed straight to one staff member.
   @Post()
   async create(@Body() body, @Req() req: Request) {
-    const { mobile, user } = body;
-
-    // Split, trim, and remove empty values
-    const mobileArray = mobile
-      .split('\n')
-      .map((item) => item.trim()) // Remove extra spaces
-      .filter((item) => item); // Remove empty entries
-
-    // Remove duplicates
-    const uniqueMobiles = [...new Set(mobileArray)];
-
-    // Prepare data for insertion
-    const data: any = uniqueMobiles.map((mobile) => ({
-      mobile,
+    const { mobile, user } = body ?? {};
+    if (!user) {
+      throw new BadRequestException('Please select a user');
+    }
+    const ctx = requestContext(req);
+    return this.service.assignMobiles(
+      { branch: ctx.branch, actorId: ctx.userId, actorName: ctx.username },
       user,
-      assigned_by: req.user['username'],
-      branch: req.user['branch']['_id'],
-    }));
-
-    // Insert only unique mobile numbers
-    return this.service.create(data);
+      rowsFromPastedText(mobile),
+    );
   }
 
+  // Pool rows (or a repeat payment) handed to a staff member; handed-out pool entries are removed.
   @Post('bulk')
   async createBulk(@Body() body, @Req() req: Request) {
     const { leads, user } = body;
-    let is_hot_lead = false;
+    const ctx = requestContext(req);
 
-    const leadIds = leads.map((item) => item?._id).filter((id) => id); // Ensures no undefined/null values
+    const leadIds = leads.map((item) => item?._id).filter((id) => id);
 
     const data = leads.map((item) => {
       if (item?.payment?.payment_date) {
@@ -72,6 +64,7 @@ export class UserLeadsController {
       }
 
       return {
+        contact: item?.contact,
         mobile: item?.mobile,
         name: item?.name,
         city: item?.city,
@@ -79,27 +72,26 @@ export class UserLeadsController {
         status: item?.status,
         payment: item?.payment,
         is_hot_lead: item?.is_hot_lead ? item?.is_hot_lead : false,
-        assigned_by: req.user['username'],
-        branch: req.user['branch']['_id'],
+        assigned_by: ctx.username,
       };
     });
-    await this.service.create(data);
+    await this.service.assign(
+      { branch: ctx.branch, actorId: ctx.userId, actorName: ctx.username },
+      data,
+    );
 
     if (data[0]?.is_hot_lead) {
-      return this.hotLeadService.deleteByIds(leadIds); // No need for await before return
+      return this.hotLeadService.deleteByIds(leadIds, ctx.branch);
     } else {
-      return this.leadService.deleteByIds(leadIds); // No need for await before return
+      return this.leadService.deleteByIds(leadIds, ctx.branch);
     }
   }
 
   @Post('delete-bulk')
   async deleteBulk(@Body() body, @Req() req: Request) {
-    const { leads, user } = body;
-    // let is_hot_lead = false;
-
-    const leadIds = leads.map((item) => item?._id); // Ensures no undefined/null values
-    console.log(leadIds);
-    return this.service.deleteByIds(leadIds); // No need for await before return
+    const { leads } = body;
+    const leadIds = leads.map((item) => item?._id);
+    return this.service.deleteByIds(leadIds);
   }
 
   @Get()
@@ -141,7 +133,7 @@ export class UserLeadsController {
     @Req() req: Request,
     @Query() query: Record<string, any>,
   ) {
-    return this.service.getLeadHistory(query);
+    return this.service.getLeadHistory(query, scopedBranch(req));
   }
 
   @Get('my-follow-up')
@@ -174,8 +166,12 @@ export class UserLeadsController {
   }
 
   @Put(':id')
-  async update(@Param('id') id: string, @Body() updateDto: UpdateUserLeadDto) {
-    return this.service.update(id, updateDto);
+  async update(
+    @Param('id') id: string,
+    @Body() updateDto: UpdateUserLeadDto,
+    @Req() req: Request,
+  ) {
+    return this.service.update(id, updateDto, req?.user['userId']);
   }
 
   @Delete(':id')
@@ -184,20 +180,37 @@ export class UserLeadsController {
   }
 
   @Patch(':id')
-  updatePartial(@Param('id') id: string, @Body() updateDto: UpdateUserLeadDto) {
-    return this.service.update(id, updateDto);
+  updatePartial(
+    @Param('id') id: string,
+    @Body() updateDto: UpdateUserLeadDto,
+    @Req() req: Request,
+  ) {
+    return this.service.update(id, updateDto, req?.user['userId']);
   }
 
+  // Excel of numbers for staff. Columns: mobile, user (staff id), optional name, city, status.
   @Post('import-excel')
   @UseInterceptors(FileInterceptor('file'))
-  async uploadExcel(@UploadedFile() file: Express.Multer.File) {
-    if (!file) {
-      throw new BadRequestException('File is required');
+  async uploadExcel(
+    @UploadedFile() file: Express.Multer.File,
+    @Req() req: Request,
+  ) {
+    const rows = readSheetRows(file);
+    if (rows.some((row) => !row.user)) {
+      throw new BadRequestException('Every row needs a user column');
     }
-    const workbook = XLSX.read(file.buffer, { type: 'buffer' });
-    const sheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[sheetName];
-    const jsonData = XLSX.utils.sheet_to_json(sheet);
-    return await this.service.insertData(jsonData);
+    const ctx = requestContext(req);
+    const created = await this.service.assign(
+      { branch: ctx.branch, actorId: ctx.userId, actorName: ctx.username },
+      rows.map((row) => ({
+        mobile: row.mobile,
+        name: row.name || undefined,
+        city: row.city || undefined,
+        user: String(row.user),
+        status: row.status || undefined,
+        assigned_by: ctx.username,
+      })),
+    );
+    return { message: 'Data inserted successfully', insertedData: created };
   }
 }

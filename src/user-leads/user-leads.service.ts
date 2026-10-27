@@ -17,11 +17,43 @@ import { LeadsService } from 'src/leads/leads.service';
 // Largest number of rows a single report export may return.
 export const MAX_REPORT_EXPORT_ROWS = 50000;
 
+import { ContactsService, RawLeadRow } from 'src/contacts/contacts.service';
+import { LeadActivityService } from 'src/contacts/lead-activity.service';
+import {
+  assignByMobiles,
+  assignMany,
+  AssignContext,
+} from 'src/contacts/assignment.helper';
+
 @Injectable()
 export class UserLeadsService {
   constructor(
     @InjectModel(UserLead.name) private readonly model: Model<UserLead>,
+    private readonly contacts: ContactsService,
+    private readonly activity: LeadActivityService,
   ) {}
+
+  /** Hands leads to staff: attaches contacts, saves the rows, logs ASSIGNED. */
+  async assign(ctx: AssignContext, items: Record<string, any>[]) {
+    return assignMany(this.model, this.contacts, this.activity, 'LEAD', ctx, items);
+  }
+
+  /** Pasted numbers handed to one staff member. */
+  async assignMobiles(
+    ctx: AssignContext,
+    assigneeId: string,
+    rows: RawLeadRow[],
+  ) {
+    return assignByMobiles(
+      this.model,
+      this.contacts,
+      this.activity,
+      'LEAD',
+      ctx,
+      assigneeId,
+      rows,
+    );
+  }
 
   async create(createDto: CreateUserLeadDto[]) {
     // const { mobile } = createDto;
@@ -1188,13 +1220,29 @@ export class UserLeadsService {
   async update(
     id: string,
     updatePatientDto: UpdateUserLeadDto,
+    actorId?: string,
   ): Promise<UserLead> {
     const updateFields: any = {};
+
+    // Working a lead sets a status; remember where it was so the change is on record.
+    const before =
+      updatePatientDto.status !== undefined
+        ? await this.model
+            .findById(id)
+            .select('status contact user branch')
+            .lean()
+            .exec()
+        : null;
 
     console.log(updatePatientDto);
     // ✅ Update top-level fields dynamically (excluding nested ones)
     Object.keys(updatePatientDto).forEach((key) => {
-      if (!['payment', 'free_trial', 'follow_up'].includes(key)) {
+      // the number and company are the lead's identity and never change here
+      if (
+        !['payment', 'free_trial', 'follow_up', 'mobile', 'contact', 'branch'].includes(
+          key,
+        )
+      ) {
         updateFields[key] = updatePatientDto[key];
       }
     });
@@ -1253,6 +1301,15 @@ export class UserLeadsService {
       throw new NotFoundException(`Patient #${id} not found`);
     }
 
+    if (before) {
+      await this.activity.logStatusUpdate(
+        'LEAD',
+        before,
+        updatePatientDto.status,
+        actorId,
+      );
+    }
+
     return updatedUserLead;
   }
 
@@ -1307,14 +1364,6 @@ export class UserLeadsService {
     return existingPatient;
   }
 
-  async insertData(data: any[]): Promise<any> {
-    try {
-      const insertedData = await this.model.insertMany(data);
-      return { message: 'Data inserted successfully', insertedData };
-    } catch (error) {
-      throw new Error(`Failed to insert data: ${error.message}`);
-    }
-  }
 
   async remove(id: string): Promise<UserLead> {
     const deletedPatient = await this.model.findByIdAndDelete(id).exec();
@@ -1324,32 +1373,32 @@ export class UserLeadsService {
     return deletedPatient;
   }
 
-  async getLeadHistory(params: Record<string, any>) {
-    const page = parseInt(params.page);
-    const size = parseInt(params.size);
-    const skip = page * size;
+  /**
+   * Every time a number was handed out, newest first. Looks the number up as a
+   * contact (so +91 / spaces do not matter) and lists the calling rows that
+   * point at it. Staff of a company only see their own company's history.
+   */
+  async getLeadHistory(params: Record<string, any>, branch?: string) {
+    const page = parseInt(params.page, 10) || 0;
+    const size = parseInt(params.size, 10) || 10;
 
-    console.log('page', page);
-    console.log('size', size);
-
-    console.log(params);
-    if (params.mobile) {
-      const isValidMobile = /^\d{10}$/.test(params.mobile);
-      if (!isValidMobile) {
-        throw new BadRequestException('Invalid Mobile Number');
-      }
-    }
-
-    if (params.mobile == '') {
+    if (params.mobile == '' || params.mobile === undefined) {
       throw new BadRequestException('Please enter Mobile number');
     }
 
-    let query = { mobile: params.mobile };
+    // throws 'Invalid Mobile Number' for anything that is not a 10 digit mobile
+    const found = await this.contacts.findByMobile(branch, params.mobile);
+    if (found.length === 0) {
+      return { data: [], total: 0 };
+    }
 
-    let data = await this.model
+    const query = { contact: { $in: found.map((c) => c._id) } };
+
+    const data = await this.model
       .find(query)
+      .sort({ created_at: -1 })
       .populate('user')
-      .skip(skip)
+      .skip(page * size)
       .limit(size)
       .exec();
 
@@ -1371,16 +1420,6 @@ export class UserLeadsService {
       .exec();
   }
 
-  async importData(jsonData) {
-    for (const data of jsonData) {
-      const item = new this.model({
-        mobile: data['mobile'],
-        name: data['name'],
-        city: data['city'],
-      });
-      await item.save();
-    }
-  }
 
   async getCurrentMonthPaymentDoneByUserId(id) {
     const startOfMonth = new Date(
