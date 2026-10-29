@@ -30,6 +30,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
 import { IncentiveModule } from './incentive/incentive.module';
 import { UserHotLeadsModule } from './user-hot-leads/user-hot-leads.module';
 import { ContactsModule } from './contacts/contacts.module';
+import { AttendanceModule } from './attendance/attendance.module';
 
 @Module({
   imports: [
@@ -59,6 +60,7 @@ import { ContactsModule } from './contacts/contacts.module';
     IncentiveModule,
     UserHotLeadsModule,
     ContactsModule,
+    AttendanceModule,
   ],
   controllers: [AppController, UploadsController],
   providers: [AppService, PdfService, FileUploadService],
