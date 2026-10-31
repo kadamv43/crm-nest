@@ -5,9 +5,10 @@ import {
 } from '@nestjs/common';
 import { Model, Types } from 'mongoose';
 import { normalizeMobile } from 'src/common/mobile.util';
+import { parseDayRange } from 'src/common/time.util';
 import { ContactsService } from './contacts.service';
 
-const escapeRegex = (text: string) =>
+export const escapeRegex = (text: string) =>
   text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const scope = (branch?: string) =>
@@ -26,6 +27,12 @@ export async function listPool(
   if (params.q) {
     const regex = new RegExp(escapeRegex(String(params.q)), 'i');
     query.$or = [{ mobile: regex }, { name: regex }, { city: regex }];
+  }
+
+  // the date range is the day the number was uploaded (India-time days)
+  const range = parseDayRange(params.from, params.to);
+  if (range) {
+    query.created_at = { $gte: range.gte, $lte: range.lte };
   }
 
   const [data, total] = await Promise.all([

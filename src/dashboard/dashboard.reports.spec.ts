@@ -12,7 +12,7 @@ describe('DashboardController.getReports', () => {
   beforeEach(() => {
     jest.resetAllMocks();
     userLeadsService.getReports.mockResolvedValue({ data: [], total: 0 });
-    controller = new DashboardController(userService, userLeadsService);
+    controller = new DashboardController(userService, userLeadsService, {} as any);
   });
 
   it('team lead report covers the team and the team lead', async () => {

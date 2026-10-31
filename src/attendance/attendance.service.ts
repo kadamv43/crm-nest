@@ -59,6 +59,40 @@ export class AttendanceService {
     return { date, data, total: data.length };
   }
 
+  /**
+   * Who logged in during a range of attendance days (one day when `to` is
+   * left out): the earliest first-login and how many of the days they were
+   * present. Limited to some people and/or one company when asked.
+   */
+  async rangeSummary(
+    from: string,
+    to: string = from,
+    options: { branch?: string; users?: string[] } = {},
+  ): Promise<{ user: string; first_login_at: Date; days_present: number }[]> {
+    const match: Record<string, any> = { date: { $gte: from, $lte: to } };
+    if (options.branch) {
+      match.branch = oid(options.branch);
+    }
+    if (options.users) {
+      match.user = { $in: options.users.map(oid) };
+    }
+    const rows = await this.model.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: '$user',
+          first_login_at: { $min: '$first_login_at' },
+          days_present: { $sum: 1 },
+        },
+      },
+    ]);
+    return rows.map((r) => ({
+      user: String(r._id),
+      first_login_at: r.first_login_at,
+      days_present: r.days_present,
+    }));
+  }
+
   /** Ids of the people who logged in on an attendance day. */
   async loggedInUserIds(date: string, branch?: string): Promise<string[]> {
     const filter: Record<string, any> = { date };

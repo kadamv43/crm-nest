@@ -13,6 +13,8 @@ import { ObjectId } from 'mongoose';
 import { types } from 'util';
 import { iif } from 'rxjs';
 import { LeadsService } from 'src/leads/leads.service';
+import { parseDayRange } from 'src/common/time.util';
+import { escapeRegex } from 'src/contacts/pool.helper';
 
 // Largest number of rows a single report export may return.
 export const MAX_REPORT_EXPORT_ROWS = 50000;
@@ -1075,13 +1077,30 @@ export class UserLeadsService {
     return { data: patients, total: totalRecords };
   }
 
-  async getAssigneddHotLeads(id: string, params) {
+  // Search box and date range of the "assigned" lists. The date range is when
+  // the lead was handed out (India-time days, both ends included).
+  private applyListFilters(query: Record<string, any>, params: any) {
+    if (params?.q && String(params.q).trim() !== '') {
+      const regex = new RegExp(escapeRegex(String(params.q).trim()), 'i');
+      query.$or = [{ mobile: regex }, { name: regex }, { city: regex }];
+    }
+    const range = parseDayRange(params?.from, params?.to);
+    if (range) {
+      query.created_at = { $gte: range.gte, $lte: range.lte };
+    }
+  }
+
+  async getAssigneddHotLeads(id: string, params, branch?: string) {
     const size = params.size;
     const skip = params.page * params.size;
 
     let query = {};
 
     query = { is_hot_lead: true, status: 'FRESH' };
+    if (branch) {
+      query['branch'] = new Types.ObjectId(branch);
+    }
+    this.applyListFilters(query, params);
 
     const now = new Date();
 
@@ -1123,13 +1142,17 @@ export class UserLeadsService {
     return { data: patients, total: totalRecords };
   }
 
-  async getAssignedLeads(id: string, params) {
+  async getAssignedLeads(id: string, params, branch?: string) {
     const size = params.size;
     const skip = params.page * params.size;
 
     let query = {};
 
     query = { is_hot_lead: false, status: 'FRESH' };
+    if (branch) {
+      query['branch'] = new Types.ObjectId(branch);
+    }
+    this.applyListFilters(query, params);
 
     const now = new Date();
 
@@ -1239,9 +1262,16 @@ export class UserLeadsService {
     Object.keys(updatePatientDto).forEach((key) => {
       // the number and company are the lead's identity and never change here
       if (
-        !['payment', 'free_trial', 'follow_up', 'mobile', 'contact', 'branch'].includes(
-          key,
-        )
+        ![
+          'payment',
+          'free_trial',
+          'follow_up',
+          'mobile',
+          'contact',
+          'branch',
+          'campaign',
+          'campaign_round',
+        ].includes(key)
       ) {
         updateFields[key] = updatePatientDto[key];
       }

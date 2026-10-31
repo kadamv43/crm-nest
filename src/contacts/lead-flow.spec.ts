@@ -35,6 +35,7 @@ describeDb('Daily lead flow (contacts)', () => {
     staff2: { userId: String(id()), role: 'employee', branch: String(branchA), username: 'staff2' },
     adminB: { userId: String(id()), role: 'admin', branch: String(branchB), username: 'adminB' },
     superadmin: { userId: String(id()), role: 'superadmin', branch: String(branchA), username: 'root' },
+    orphan: { userId: String(id()), role: 'admin', branch: '', username: 'orphan' }, // not linked to a company
   };
   type Who = keyof typeof people;
 
@@ -782,5 +783,218 @@ describeDb('Daily lead flow (contacts)', () => {
       ]);
       expect(dup).toEqual([]);
     }, 60000);
+  });
+
+  // ------------------------------------------- admin "Assigned Leads" pages
+  describe('Assigned Leads pages stay inside the company', () => {
+    const assignedA = ['9000000001', '9000000002', '9000000003'];
+    const assignedB = ['9100000001', '9100000002'];
+
+    beforeEach(async () => {
+      await post('adminA', '/user-leads', { user: people.staff1.userId, mobile: assignedA.join('\n') }).expect(201);
+      await post('adminB', '/user-leads', { user: people.adminB.userId, mobile: assignedB.join('\n') }).expect(201);
+    });
+
+    const mobilesOf = (res) => res.body.data.map((r) => r.mobile).sort();
+
+    it('an admin sees only the fresh leads of their own company', async () => {
+      const a = await get('adminA', '/user-leads/assigned-leads?page=0&size=50').expect(200);
+      expect(a.body.total).toBe(3);
+      expect(mobilesOf(a)).toEqual(assignedA);
+      const b = await get('adminB', '/user-leads/assigned-leads?page=0&size=50').expect(200);
+      expect(b.body.total).toBe(2);
+      expect(mobilesOf(b)).toEqual(assignedB);
+    });
+
+    it('asking for another company changes nothing', async () => {
+      const res = await get('adminA', `/user-leads/assigned-leads?page=0&size=50&branch=${branchB}`).expect(200);
+      expect(mobilesOf(res)).toEqual(assignedA);
+    });
+
+    it('team leads and staff are fenced in the same way', async () => {
+      for (const who of ['tlA', 'staff1'] as Who[]) {
+        const res = await get(who, '/user-leads/assigned-leads?page=0&size=50').expect(200);
+        expect(mobilesOf(res)).toEqual(assignedA);
+      }
+    });
+
+    it('superadmin sees every company, or one when asked', async () => {
+      const all = await get('superadmin', '/user-leads/assigned-leads?page=0&size=50').expect(200);
+      expect(all.body.total).toBe(5);
+      const one = await get('superadmin', `/user-leads/assigned-leads?page=0&size=50&branch=${branchB}`).expect(200);
+      expect(mobilesOf(one)).toEqual(assignedB);
+    });
+
+    it('lists only leads nobody has worked yet', async () => {
+      const row = await m.userLead.findOne({ mobile: '9000000001' }).lean<any>();
+      await put('staff1', `/user-leads/${row._id}`, { status: 'RINGING' }).expect(200);
+      const a = await get('adminA', '/user-leads/assigned-leads?page=0&size=50').expect(200);
+      expect(mobilesOf(a)).toEqual(['9000000002', '9000000003']);
+    });
+
+    it('pages with a total that matches the company', async () => {
+      const p0 = await get('adminA', '/user-leads/assigned-leads?page=0&size=2').expect(200);
+      const p1 = await get('adminA', '/user-leads/assigned-leads?page=1&size=2').expect(200);
+      expect(p0.body.total).toBe(3);
+      expect(p0.body.data.length).toBe(2);
+      expect(p1.body.data.length).toBe(1);
+      expect(new Set([...mobilesOf(p0), ...mobilesOf(p1)]).size).toBe(3);
+    });
+
+    it('hot leads: same fence, and normal and hot pages do not mix', async () => {
+      await post('adminA', '/user-leads/bulk', {
+        user: people.staff1.userId,
+        leads: [{ mobile: '9200000001', is_hot_lead: true }, { mobile: '9200000002', is_hot_lead: true }],
+      }).expect(201);
+      await post('adminB', '/user-leads/bulk', {
+        user: people.adminB.userId,
+        leads: [{ mobile: '9300000001', is_hot_lead: true }],
+      }).expect(201);
+
+      const a = await get('adminA', '/user-leads/assigned-hot-leads?page=0&size=50').expect(200);
+      expect(mobilesOf(a)).toEqual(['9200000001', '9200000002']);
+      const b = await get('adminB', '/user-leads/assigned-hot-leads?page=0&size=50').expect(200);
+      expect(mobilesOf(b)).toEqual(['9300000001']);
+      const other = await get('adminA', `/user-leads/assigned-hot-leads?page=0&size=50&branch=${branchB}`).expect(200);
+      expect(mobilesOf(other)).toEqual(['9200000001', '9200000002']);
+      const all = await get('superadmin', '/user-leads/assigned-hot-leads?page=0&size=50').expect(200);
+      expect(all.body.total).toBe(3);
+
+      // the normal page still has only normal leads
+      const normal = await get('adminA', '/user-leads/assigned-leads?page=0&size=50').expect(200);
+      expect(mobilesOf(normal)).toEqual(assignedA);
+    });
+
+    it('needs a login, and an account without a company gets nothing instead of everything', async () => {
+      await request(server).get('/user-leads/assigned-leads').expect(401);
+      await request(server).get('/user-leads/assigned-hot-leads').expect(401);
+      await get('orphan', '/user-leads/assigned-leads?page=0&size=50').expect(403);
+      await get('orphan', '/user-leads/assigned-hot-leads?page=0&size=50').expect(403);
+    });
+  });
+
+  // ------------------------------- date range and search on the lists
+  describe('date range and search on the lists', () => {
+    const at = (text: string) => new Date(text.replace(' ', 'T') + ':00+05:30');
+    const assign = (who: Who, mobile: string, to: Who = 'staff1') =>
+      post(who, '/user-leads', { user: people[to].userId, mobile }).expect(201);
+
+    // company A: four leads handed out around the India-time midnight
+    beforeEach(async () => {
+      for (const n of ['1', '2', '3', '4']) {
+        await assign('adminA', '900000000' + n);
+      }
+      const stamps = {
+        '9000000001': '2025-03-09 23:55',
+        '9000000002': '2025-03-10 00:05',
+        '9000000003': '2025-03-10 23:55',
+        '9000000004': '2025-03-11 00:05',
+      };
+      for (const [mobile, when] of Object.entries(stamps)) {
+        await m.userLead.updateOne({ mobile }, { $set: { created_at: at(when) } });
+      }
+      await m.userLead.updateOne({ mobile: '9000000002' }, { $set: { name: 'Asha Kulkarni', city: 'Pune' } });
+      await m.userLead.updateOne({ mobile: '9000000003' }, { $set: { name: 'Ravi Shah', city: 'Delhi' } });
+      // another company has a lead on the same day: must never appear
+      await assign('adminB', '9100000001', 'adminB');
+      await m.userLead.updateOne({ mobile: '9100000001' }, { $set: { created_at: at('2025-03-10 12:00') } });
+    });
+
+    const page = (who: Who, query: string) =>
+      get(who, '/user-leads/assigned-leads?page=0&size=50' + query).expect(200);
+    const mobiles = (res) => res.body.data.map((r) => r.mobile).sort();
+
+    it('one day means the whole India day: 00:05 and 23:55 are in, the neighbours are out', async () => {
+      const res = await page('adminA', '&from=2025-03-10&to=2025-03-10');
+      expect(mobiles(res)).toEqual(['9000000002', '9000000003']);
+      expect(res.body.total).toBe(2);
+    });
+
+    it('a range includes both end days', async () => {
+      const res = await page('adminA', '&from=2025-03-09&to=2025-03-11');
+      expect(mobiles(res)).toEqual(['9000000001', '9000000002', '9000000003', '9000000004']);
+    });
+
+    it('an unfinished range (only the first date, or "null" as the end) means that day', async () => {
+      expect(mobiles(await page('adminA', '&from=2025-03-10'))).toEqual(['9000000002', '9000000003']);
+      expect(mobiles(await page('adminA', '&from=2025-03-10&to=null'))).toEqual(['9000000002', '9000000003']);
+    });
+
+    it('no dates, or unusable ones, filter nothing', async () => {
+      const all = ['9000000001', '9000000002', '9000000003', '9000000004'];
+      expect(mobiles(await page('adminA', ''))).toEqual(all);
+      expect(mobiles(await page('adminA', '&from=null&to=null'))).toEqual(all);
+      expect(mobiles(await page('adminA', '&from=abc&to=2025-99-99'))).toEqual(all);
+    });
+
+    it('a day with nothing is an empty list with a zero total', async () => {
+      const res = await page('adminA', '&from=2025-04-01&to=2025-04-02');
+      expect(res.body).toEqual({ data: [], total: 0 });
+    });
+
+    it('the totals follow the filter when paging', async () => {
+      const p0 = await get('adminA', '/user-leads/assigned-leads?page=0&size=1&from=2025-03-09&to=2025-03-11').expect(200);
+      const p3 = await get('adminA', '/user-leads/assigned-leads?page=3&size=1&from=2025-03-09&to=2025-03-11').expect(200);
+      expect(p0.body.total).toBe(4);
+      expect(p0.body.data.length).toBe(1);
+      expect(p3.body.data.length).toBe(1);
+    });
+
+    it('never leaks another company, whatever the dates', async () => {
+      const a = await page('adminA', '&from=2025-03-10&to=2025-03-10');
+      expect(mobiles(a)).not.toContain('9100000001');
+      const b = await page('adminB', '&from=2025-03-10&to=2025-03-10');
+      expect(mobiles(b)).toEqual(['9100000001']);
+      const root = await page('superadmin', '&from=2025-03-10&to=2025-03-10');
+      expect(mobiles(root)).toEqual(['9000000002', '9000000003', '9100000001']);
+    });
+
+    it('searches mobile, name and city, and the search text is not a pattern', async () => {
+      expect(mobiles(await page('adminA', '&q=0003'))).toEqual(['9000000003']);
+      expect(mobiles(await page('adminA', '&q=asha'))).toEqual(['9000000002']);
+      expect(mobiles(await page('adminA', '&q=DELHI'))).toEqual(['9000000003']);
+      expect(mobiles(await page('adminA', '&q=.*'))).toEqual([]);
+      expect(mobiles(await page('adminA', '&q=%28'))).toEqual([]); // a lone bracket must not break the page
+      expect(mobiles(await page('adminA', '&q='))).toHaveLength(4);
+    });
+
+    it('search and dates work together', async () => {
+      expect(mobiles(await page('adminA', '&q=ravi&from=2025-03-10&to=2025-03-10'))).toEqual(['9000000003']);
+      expect(mobiles(await page('adminA', '&q=ravi&from=2025-03-11&to=2025-03-11'))).toEqual([]);
+    });
+
+    it('the hot-lead page filters the same way', async () => {
+      for (const [mobile, when] of [['9200000001', '2025-03-10 00:05'], ['9200000002', '2025-03-11 00:05']]) {
+        await post('adminA', '/user-leads/bulk', { user: people.staff1.userId, leads: [{ mobile, is_hot_lead: true }] }).expect(201);
+        await m.userLead.updateOne({ mobile }, { $set: { created_at: at(when) } });
+      }
+      const res = await get('adminA', '/user-leads/assigned-hot-leads?page=0&size=50&from=2025-03-10&to=2025-03-10').expect(200);
+      expect(mobiles(res)).toEqual(['9200000001']);
+      const none = await get('adminA', '/user-leads/assigned-hot-leads?page=0&size=50&from=2025-03-12&to=2025-03-12').expect(200);
+      expect(none.body.total).toBe(0);
+    });
+
+    it('the pool pages (leads and hot leads) filter by upload day and search', async () => {
+      await post('adminA', '/leads', { mobile: '9300000001' }).expect(201);
+      await post('adminA', '/leads', { mobile: '9300000002' }).expect(201);
+      await m.lead.updateOne({ mobile: '9300000001' }, { $set: { created_at: at('2025-03-10 09:00') } });
+      await m.lead.updateOne({ mobile: '9300000002' }, { $set: { created_at: at('2025-03-11 09:00') } });
+      const day = await get('adminA', '/leads?page=0&size=50&from=2025-03-10&to=2025-03-10').expect(200);
+      expect(mobiles(day)).toEqual(['9300000001']);
+      expect(day.body.total).toBe(1);
+      const both = await get('adminA', '/leads?page=0&size=50&from=2025-03-10&to=2025-03-11').expect(200);
+      expect(both.body.total).toBe(2);
+      const withSearch = await get('adminA', '/leads?page=0&size=50&from=2025-03-10&to=2025-03-11&q=0002').expect(200);
+      expect(mobiles(withSearch)).toEqual(['9300000002']);
+      const other = await get('adminB', '/leads?page=0&size=50&from=2025-03-10&to=2025-03-11').expect(200);
+      expect(other.body.total).toBe(0);
+
+      await post('adminA', '/hot-leads', { mobile: '9400000001' }).expect(201);
+      await m.hot.updateOne({ mobile: '9400000001' }, { $set: { created_at: at('2025-03-10 09:00') } });
+      const hot = await get('adminA', '/hot-leads?page=0&size=50&from=2025-03-10&to=2025-03-10').expect(200);
+      expect(mobiles(hot)).toEqual(['9400000001']);
+      const hotNone = await get('adminA', '/hot-leads?page=0&size=50&from=2025-03-11&to=2025-03-11').expect(200);
+      expect(hotNone.body.total).toBe(0);
+    });
   });
 });

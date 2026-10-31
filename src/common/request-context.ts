@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { Request } from 'express';
 
 export interface RequestContext {
@@ -40,5 +40,9 @@ export function scopedBranch(
     return requested || undefined;
   }
   const branch = user?.branch?._id ?? user?.branch;
-  return branch ? String(branch) : undefined;
+  if (!branch) {
+    // never fall back to "all companies" for someone who is not linked to one
+    throw new ForbiddenException('Your account is not linked to a company');
+  }
+  return String(branch);
 }

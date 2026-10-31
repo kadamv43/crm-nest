@@ -1,4 +1,11 @@
-import { attendanceDate, nextAutoLogout } from './time.util';
+import {
+  attendanceDate,
+  attendanceDayRange,
+  daysInRange,
+  isRealDay,
+  nextAutoLogout,
+  parseDayRange,
+} from './time.util';
 
 // India time written the way people say it, converted to a real moment.
 const ist = (text: string) => new Date(text.replace(' ', 'T') + ':00+05:30');
@@ -85,5 +92,137 @@ describe('nextAutoLogout (11 PM India time)', () => {
       expect(at).toBeGreaterThan(now.getTime());
       expect(at - now.getTime()).toBeLessThanOrEqual(24 * 60 * 60 * 1000);
     }
+  });
+});
+
+describe('parseDayRange (date filters on the lists)', () => {
+  const iso = (d: Date | undefined) => d?.toISOString();
+
+  it('one plain date is that whole India day, both ends included', () => {
+    const r = parseDayRange('2025-03-10', '2025-03-10');
+    expect(iso(r.gte)).toBe('2025-03-09T18:30:00.000Z'); // 00:00 India time
+    expect(iso(r.lte)).toBe('2025-03-10T18:29:59.999Z'); // 23:59:59.999 India time
+  });
+
+  it('a range runs from the start of the first day to the end of the last', () => {
+    const r = parseDayRange('2025-03-10', '2025-03-12');
+    expect(iso(r.gte)).toBe('2025-03-09T18:30:00.000Z');
+    expect(iso(r.lte)).toBe('2025-03-12T18:29:59.999Z');
+  });
+
+  it('only one end given means just that day', () => {
+    const only = parseDayRange('2025-03-10');
+    expect(iso(only.gte)).toBe('2025-03-09T18:30:00.000Z');
+    expect(iso(only.lte)).toBe('2025-03-10T18:29:59.999Z');
+    const onlyTo = parseDayRange(undefined, '2025-03-10');
+    expect(iso(onlyTo.gte)).toBe('2025-03-09T18:30:00.000Z');
+    expect(iso(onlyTo.lte)).toBe('2025-03-10T18:29:59.999Z');
+  });
+
+  it('treats the text "null" (what an unfinished range sends) as not given', () => {
+    const r = parseDayRange('2025-03-10', 'null');
+    expect(iso(r.gte)).toBe('2025-03-09T18:30:00.000Z');
+    expect(iso(r.lte)).toBe('2025-03-10T18:29:59.999Z');
+    expect(parseDayRange('null', 'null')).toBeNull();
+  });
+
+  it.each([
+    [undefined, undefined],
+    ['', ''],
+    ['   ', '   '],
+    ['abc', 'xyz'],
+    ['2025-02-30', '2025-13-01'],
+    ['10-03-2025', '2025/03/10'],
+    [null, null],
+    [123, 456],
+    [['2025-03-10'], { a: 1 }],
+  ])('ignores unusable values %p %p', (from, to) => {
+    expect(parseDayRange(from as any, to as any)).toBeNull();
+  });
+
+  it('one good end and one bad end still gives that day', () => {
+    const r = parseDayRange('abc', '2025-03-10');
+    expect(iso(r.gte)).toBe('2025-03-09T18:30:00.000Z');
+    expect(iso(r.lte)).toBe('2025-03-10T18:29:59.999Z');
+  });
+
+  it('a full timestamp is used exactly as given', () => {
+    const r = parseDayRange('2025-03-10T04:00:00.000Z', '2025-03-10T12:00:00.000Z');
+    expect(iso(r.gte)).toBe('2025-03-10T04:00:00.000Z');
+    expect(iso(r.lte)).toBe('2025-03-10T12:00:00.000Z');
+  });
+
+  it('a leap day and month ends are real days', () => {
+    expect(parseDayRange('2024-02-29', '2024-02-29')).not.toBeNull();
+    expect(parseDayRange('2025-02-29', '2025-02-29')).toBeNull();
+    const r = parseDayRange('2025-12-31', '2025-12-31');
+    expect(iso(r.lte)).toBe('2025-12-31T18:29:59.999Z');
+  });
+
+  it('an end before the start is kept as given, so it simply matches nothing', () => {
+    const r = parseDayRange('2025-03-12', '2025-03-10');
+    expect(r.gte.getTime()).toBeGreaterThan(r.lte.getTime());
+  });
+
+  it('trims spaces', () => {
+    expect(parseDayRange(' 2025-03-10 ', ' 2025-03-10 ')).not.toBeNull();
+  });
+});
+
+describe('attendanceDayRange (what the smart view covers)', () => {
+  const iso = (d: Date) => d.toISOString();
+
+  it('one day runs from 8:00 AM to 7:59:59.999 AM the next morning, India time', () => {
+    const r = attendanceDayRange('2025-03-10');
+    expect(iso(r.start)).toBe('2025-03-10T02:30:00.000Z'); // 08:00 India
+    expect(iso(r.end)).toBe('2025-03-11T02:29:59.999Z'); // 07:59:59.999 India next day
+  });
+
+  it('a range ends at the end of its last day', () => {
+    const r = attendanceDayRange('2025-03-10', '2025-03-12');
+    expect(iso(r.start)).toBe('2025-03-10T02:30:00.000Z');
+    expect(iso(r.end)).toBe('2025-03-13T02:29:59.999Z');
+  });
+
+  it('agrees with attendanceDate: the start is the first moment of the day, the end the last', () => {
+    const r = attendanceDayRange('2025-03-10');
+    expect(attendanceDate(r.start)).toBe('2025-03-10');
+    expect(attendanceDate(new Date(r.start.getTime() - 1))).toBe('2025-03-09');
+    expect(attendanceDate(r.end)).toBe('2025-03-10');
+    expect(attendanceDate(new Date(r.end.getTime() + 1))).toBe('2025-03-11');
+  });
+
+  it('works across month, year and leap-day ends', () => {
+    expect(iso(attendanceDayRange('2025-12-31').end)).toBe('2026-01-01T02:29:59.999Z');
+    expect(iso(attendanceDayRange('2024-02-29').end)).toBe('2024-03-01T02:29:59.999Z');
+  });
+
+  it('days are 24 hours long, back to back with no gap or overlap', () => {
+    const mon = attendanceDayRange('2025-03-10');
+    const tue = attendanceDayRange('2025-03-11');
+    expect(tue.start.getTime() - mon.end.getTime()).toBe(1);
+    expect(mon.end.getTime() - mon.start.getTime() + 1).toBe(24 * 60 * 60 * 1000);
+  });
+});
+
+describe('isRealDay / daysInRange', () => {
+  it.each(['2025-03-10', '2024-02-29', '2025-12-31', '2025-01-01'])('%s is a real day', (d) => {
+    expect(isRealDay(d)).toBe(true);
+  });
+
+  it.each(['2025-02-29', '2025-13-01', '2025-00-10', '2025-03-32', '10-03-2025', '2025-3-1', '2025/03/10', '', 'abc', ' 2025-03-10', '2025-03-10T00:00', null, undefined, 20250310])(
+    '%p is not',
+    (d) => {
+      expect(isRealDay(d as any)).toBe(false);
+    },
+  );
+
+  it('counts both end days', () => {
+    expect(daysInRange('2025-03-10', '2025-03-10')).toBe(1);
+    expect(daysInRange('2025-03-10', '2025-03-12')).toBe(3);
+    expect(daysInRange('2025-03-01', '2025-03-31')).toBe(31);
+    expect(daysInRange('2025-03-01', '2025-04-01')).toBe(32);
+    expect(daysInRange('2024-02-28', '2024-03-01')).toBe(3); // leap day
+    expect(daysInRange('2024-12-31', '2025-01-01')).toBe(2); // year end
   });
 });

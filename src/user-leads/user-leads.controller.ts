@@ -117,7 +117,12 @@ export class UserLeadsController {
     @Req() req: Request,
     @Query() query: Record<string, any>,
   ) {
-    return this.service.getAssigneddHotLeads(req?.user['userId'], query);
+    // each company only ever sees its own leads; superadmin may pick one with ?branch=
+    return this.service.getAssigneddHotLeads(
+      req?.user['userId'],
+      query,
+      scopedBranch(req, query?.branch),
+    );
   }
 
   @Get('assigned-leads')
@@ -125,7 +130,12 @@ export class UserLeadsController {
     @Req() req: Request,
     @Query() query: Record<string, any>,
   ) {
-    return this.service.getAssignedLeads(req?.user['userId'], query);
+    // each company only ever sees its own leads; superadmin may pick one with ?branch=
+    return this.service.getAssignedLeads(
+      req?.user['userId'],
+      query,
+      scopedBranch(req, query?.branch),
+    );
   }
 
   @Get('get-lead-history')
