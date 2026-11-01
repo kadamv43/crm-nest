@@ -32,6 +32,15 @@ export class Campaign {
   @Prop({ default: 0 })
   total_leads: number;
 
+  @Prop({ type: Boolean, default: false })
+  auto_assignment: boolean;
+
+  @Prop({ required: false, min: 1 })
+  interval_minutes?: number;
+
+  @Prop({ required: false })
+  next_assignment_at?: Date;
+
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', required: false })
   created_by?: any;
 

@@ -7,14 +7,18 @@ import {
   Post,
   Query,
   Req,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { Request } from 'express';
 import { Types } from 'mongoose';
 import { JwtAuthGuard } from 'src/auth/guards/jwt.guard';
 import { RolesGuard } from 'src/auth/guards/roles.guard';
 import { Roles } from 'src/auth/roles.decorator';
 import { Role } from 'src/auth/roles.enum';
+import { readSheetRows } from 'src/common/excel.util';
 import { scopedBranch } from 'src/common/request-context';
 import { CampaignsService } from './campaigns.service';
 
@@ -43,6 +47,12 @@ export class CampaignsController {
     return this.service.list(this.company(req, branch));
   }
 
+  @Get('options')
+  @Roles(Role.TeamLead, Role.Admin, Role.SuperAdmin)
+  options(@Req() req: Request, @Query('branch') branch?: string) {
+    return this.service.options(this.company(req, branch));
+  }
+
   @Get('staff')
   @Roles(Role.Admin, Role.SuperAdmin)
   staff(@Req() req: Request, @Query('branch') branch?: string) {
@@ -68,6 +78,32 @@ export class CampaignsController {
   ) {
     const company = this.company(req, branch);
     return this.service.create(this.ctx(req, company), body ?? {});
+  }
+
+  @Post('import-excel')
+  @Roles(Role.Admin, Role.SuperAdmin)
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024 } }))
+  createFromExcel(
+    @Req() req: Request,
+    @Body() body: any,
+    @UploadedFile() file: Express.Multer.File,
+    @Query('branch') branch?: string,
+  ) {
+    const company = this.company(req, branch);
+    let staff: any;
+    try {
+      staff = typeof body?.staff === 'string' ? JSON.parse(body.staff) : body?.staff;
+    } catch {
+      throw new BadRequestException('The selected staff list is invalid');
+    }
+
+    return this.service.create(this.ctx(req, company), {
+      name: body?.name,
+      staff,
+      leads: readSheetRows(file),
+      auto_assignment: body?.auto_assignment === 'true',
+      interval_minutes: body?.interval_minutes,
+    });
   }
 
   @Post(':id/next-round')

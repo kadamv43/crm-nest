@@ -854,12 +854,18 @@ export class UserLeadsService {
     page?: number;
     lead_type?: string;
     excel?: boolean;
+    campaign_report?: string | boolean;
+    campaign_id?: string;
+    campaign_name?: string;
+    branch?: string;
     user?: string | string[];
   }) {
     console.log('report', params);
     let matchStage: Record<string, any> = {};
     const { from, to, status, size = 10, page = 0, lead_type, excel } = params;
     const skip = page * size;
+    const campaignReport =
+      params.campaign_report === true || params.campaign_report === 'true';
 
     // Match by user if provided
     if (params.user) {
@@ -894,6 +900,33 @@ export class UserLeadsService {
     } else if (lead_type && lead_type == 'normal_lead') {
       matchStage['is_hot_lead'] = { $ne: true }; // also matches leads without the flag
     }
+
+    if (campaignReport) {
+      const campaignQuery: Record<string, any> = {};
+      if (params.branch && Types.ObjectId.isValid(params.branch)) {
+        campaignQuery.branch = new Types.ObjectId(params.branch);
+      }
+      const campaignName = String(params.campaign_name ?? '').trim();
+      if (campaignName) {
+        campaignQuery.name = {
+          $regex: escapeRegex(campaignName),
+          $options: 'i',
+        };
+      }
+      if (params.campaign_id) {
+        if (!Types.ObjectId.isValid(params.campaign_id)) {
+          throw new BadRequestException('Invalid campaign');
+        }
+        campaignQuery._id = new Types.ObjectId(params.campaign_id);
+      }
+      const campaigns = await this.model.db
+        .collection('campaigns')
+        .find(campaignQuery, { projection: { _id: 1 } })
+        .toArray();
+      matchStage['campaign'] = {
+        $in: campaigns.map((campaign: any) => campaign._id),
+      };
+    }
     console.log('query', matchStage);
 
     // Create the base aggregation pipeline with proper typing
@@ -908,6 +941,24 @@ export class UserLeadsService {
         },
       },
       { $unwind: { path: '$userDetails', preserveNullAndEmptyArrays: true } },
+      ...(campaignReport
+        ? [
+            {
+              $lookup: {
+                from: 'campaigns',
+                localField: 'campaign',
+                foreignField: '_id',
+                as: 'campaignDetails',
+              },
+            },
+            {
+              $unwind: {
+                path: '$campaignDetails',
+                preserveNullAndEmptyArrays: true,
+              },
+            },
+          ]
+        : []),
       {
         $project: {
           _id: 1,
@@ -925,6 +976,7 @@ export class UserLeadsService {
           is_hot_lead: 1,
           status: 1,
           created_at: 1,
+          ...(campaignReport ? { campaign_name: '$campaignDetails.name' } : {}),
         },
       },
       { $sort: { created_at: -1 } }, // Changed "desc" to -1 for descending

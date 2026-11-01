@@ -247,6 +247,21 @@ export class DashboardController {
   @Get('reports')
   async getReports(@Req() req: Request, @Query() query: Record<string, any>) {
     const user = await this.userService.findOne(query?.user);
+    const campaignReport = query.campaign_report === 'true';
+
+    if (campaignReport) {
+      if (user.role === 'employee') {
+        throw new ForbiddenException('Campaign reports are not available to employees');
+      }
+      if (user.role === 'superadmin') {
+        if (!query.branch || !Types.ObjectId.isValid(String(query.branch))) {
+          throw new BadRequestException('branch is required');
+        }
+      } else {
+        const userBranch: any = user.branch;
+        query.branch = String(userBranch?._id ?? userBranch ?? '');
+      }
+    }
 
     if (user.role == 'superadmin') {
       const users = await this.userService.findByBranch(query?.branch);

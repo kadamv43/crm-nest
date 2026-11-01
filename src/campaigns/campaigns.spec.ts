@@ -299,7 +299,7 @@ describeDb('/campaigns', () => {
           expect(res.status).toBe(201);
           expect(res.body.round).toBe(round + 1);
           expect(res.body.moved).toBe(100);
-          expect(res.body.untouched_taken_back).toBe(0);
+          expect(res.body.untouched_retained).toBe(0);
         }
       }
       const rows: any[] = await m.UserLead.find({ campaign: cid }).lean();
@@ -363,16 +363,17 @@ describeDb('/campaigns', () => {
       expect(again.body.moved).toBe(9);
     });
 
-    it('a lead nobody called is taken back from its holder, so two people never hold one number', async () => {
+    it('a new round adds fresh assignments and keeps the previous holders\' fresh leads', async () => {
       const cid = await start(9, 3);
       const rows: any[] = await m.UserLead.find({ campaign: cid }).lean();
       await m.UserLead.updateMany({ _id: { $in: rows.slice(0, 4).map((r) => r._id) } }, { $set: { status: 'RINGING' } });
       const res = await next(cid);
-      expect(res.body.untouched_taken_back).toBe(5);
+      expect(res.body.untouched_retained).toBe(5);
       expect(res.body.moved).toBe(9);
       const fresh = await m.UserLead.find({ campaign: cid, status: 'FRESH' }).lean();
-      expect(fresh.length).toBe(9); // only the new hand-outs, none left with the old holder
-      expect(fresh.every((r: any) => r.campaign_round === 2)).toBe(true);
+      expect(fresh.length).toBe(14); // five retained from round one plus nine new hand-outs
+      expect(fresh.filter((r: any) => r.campaign_round === 1).length).toBe(5);
+      expect(fresh.filter((r: any) => r.campaign_round === 2).length).toBe(9);
       const holders = new Map<string, number>();
       for (const r of await m.UserLead.find({ campaign: cid, campaign_round: 2 }).lean()) {
         holders.set(String((r as any).contact), (holders.get(String((r as any).contact)) ?? 0) + 1);
