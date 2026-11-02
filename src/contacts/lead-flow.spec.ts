@@ -121,6 +121,8 @@ describeDb('Daily lead flow (contacts)', () => {
         _id: new Types.ObjectId(p.userId),
         username: name,
         role: p.role,
+        // real users always belong to a company
+        ...(p.branch ? { branch: new Types.ObjectId(p.branch) } : {}),
       })) as any,
     );
   });
@@ -839,6 +841,113 @@ describeDb('Daily lead flow (contacts)', () => {
       expect(p0.body.data.length).toBe(2);
       expect(p1.body.data.length).toBe(1);
       expect(new Set([...mobilesOf(p0), ...mobilesOf(p1)]).size).toBe(3);
+    });
+
+    describe('username filter', () => {
+      const url = (username: string, extra = '') =>
+        `/user-leads/assigned-leads?page=0&size=50&username=${encodeURIComponent(username)}${extra}`;
+
+      beforeEach(async () => {
+        await post('adminA', '/user-leads', { user: people.staff2.userId, mobile: '9000000011\n9000000012' }).expect(201);
+      });
+
+      it('shows only the leads of the people whose username matches', async () => {
+        const one = await get('adminA', url('staff1')).expect(200);
+        expect(mobilesOf(one)).toEqual(assignedA);
+        expect(one.body.total).toBe(3);
+        const two = await get('adminA', url('staff2')).expect(200);
+        expect(mobilesOf(two)).toEqual(['9000000011', '9000000012']);
+        expect(two.body.data.every((r) => r.user.username === 'staff2')).toBe(true);
+      });
+
+      it('matches part of a username, in any letter case', async () => {
+        const part = await get('adminA', url('TAFF')).expect(200);
+        expect(part.body.total).toBe(5); // staff1 + staff2
+        const upper = await get('adminA', url('STAFF2')).expect(200);
+        expect(upper.body.total).toBe(2);
+      });
+
+      it('blank or spaces-only means no filter', async () => {
+        for (const text of ['', '   ']) {
+          const res = await get('adminA', url(text)).expect(200);
+          expect(res.body.total).toBe(5);
+        }
+      });
+
+      it('surrounding spaces are ignored', async () => {
+        const res = await get('adminA', url('  staff2  ')).expect(200);
+        expect(res.body.total).toBe(2);
+      });
+
+      it('nobody matching gives an empty list, not everything', async () => {
+        const res = await get('adminA', url('nobody-like-this')).expect(200);
+        expect(res.body).toEqual({ data: [], total: 0 });
+      });
+
+      it('symbols are matched literally, not as a pattern', async () => {
+        for (const text of ['.*', '^', 'staff(', '[a-z]+', '\\']) {
+          const res = await get('adminA', url(text)).expect(200);
+          expect([text, res.body.total]).toEqual([text, 0]);
+        }
+      });
+
+      it('an admin cannot reach another company\'s people this way', async () => {
+        const res = await get('adminA', url('adminB')).expect(200);
+        expect(res.body.total).toBe(0);
+        const asking = await get('adminA', url('adminB', `&branch=${branchB}`)).expect(200);
+        expect(asking.body.total).toBe(0);
+      });
+
+      it('superadmin searches every company, or one when asked', async () => {
+        const all = await get('superadmin', url('admin')).expect(200);
+        expect(mobilesOf(all)).toEqual(assignedB); // only adminB holds leads here
+        const mixed = await get('superadmin', url('s')).expect(200);
+        expect(mixed.body.total).toBe(5); // staff1 + staff2; the "s" in adminB is not there
+        const inB = await get('superadmin', url('staff', `&branch=${branchB}`)).expect(200);
+        expect(inB.body.total).toBe(0);
+      });
+
+      it('works together with the search box and the date range', async () => {
+        const q = await get('adminA', url('staff1', '&q=9000000002')).expect(200);
+        expect(mobilesOf(q)).toEqual(['9000000002']);
+        const none = await get('adminA', url('staff2', '&q=9000000002')).expect(200);
+        expect(none.body.total).toBe(0);
+        const today = new Date().toISOString().slice(0, 10);
+        const dated = await get('adminA', url('staff2', `&from=${today}&to=${today}`)).expect(200);
+        expect(dated.body.total).toBe(2);
+        const past = await get('adminA', url('staff2', '&from=2001-01-01&to=2001-01-02')).expect(200);
+        expect(past.body.total).toBe(0);
+      });
+
+      it('the total and the pages follow the filter', async () => {
+        const p0 = await get('adminA', '/user-leads/assigned-leads?page=0&size=2&username=staff1').expect(200);
+        const p1 = await get('adminA', '/user-leads/assigned-leads?page=1&size=2&username=staff1').expect(200);
+        expect(p0.body.total).toBe(3);
+        expect(p0.body.data.length).toBe(2);
+        expect(p1.body.data.length).toBe(1);
+      });
+
+      it('worked leads still do not appear', async () => {
+        const row = await m.userLead.findOne({ mobile: '9000000011' }).lean<any>();
+        await put('staff2', `/user-leads/${row._id}`, { status: 'RINGING' }).expect(200);
+        const res = await get('adminA', url('staff2')).expect(200);
+        expect(mobilesOf(res)).toEqual(['9000000012']);
+      });
+
+      it('the hot-lead page has the same filter', async () => {
+        await post('adminA', '/user-leads/bulk', {
+          user: people.staff1.userId,
+          leads: [{ mobile: '9200000001', is_hot_lead: true }],
+        }).expect(201);
+        await post('adminA', '/user-leads/bulk', {
+          user: people.staff2.userId,
+          leads: [{ mobile: '9200000002', is_hot_lead: true }],
+        }).expect(201);
+        const res = await get('adminA', '/user-leads/assigned-hot-leads?page=0&size=50&username=staff2').expect(200);
+        expect(mobilesOf(res)).toEqual(['9200000002']);
+        const none = await get('adminA', '/user-leads/assigned-hot-leads?page=0&size=50&username=zzz').expect(200);
+        expect(none.body.total).toBe(0);
+      });
     });
 
     it('hot leads: same fence, and normal and hot pages do not mix', async () => {

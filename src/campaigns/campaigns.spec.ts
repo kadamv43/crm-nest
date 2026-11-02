@@ -105,6 +105,10 @@ describeDb('/campaigns', () => {
     }));
     return m.Lead.insertMany(rows);
   };
+  const fillHotPool = async (n: number, branch = A, start = 0) => {
+    const resolved = await contacts.resolve(String(branch), Array.from({ length: n }, (_, i) => ({ mobile: String(9500000000 + start + i) })));
+    return m.HotLead.insertMany(resolved.rows.map((r: any) => ({ contact: r.contact._id, mobile: r.mobile, branch })));
+  };
   /** staff work every lead they currently hold */
   const workEverything = (campaignId: any, status = 'RINGING') =>
     m.UserLead.updateMany({ campaign: campaignId, status: 'FRESH' }, { $set: { status } });
@@ -125,6 +129,7 @@ describeDb('/campaigns', () => {
       Campaign: app.get(getModelToken('Campaign')),
       CampaignLead: app.get(getModelToken('CampaignLead')),
       Lead: app.get(getModelToken('Lead')),
+      HotLead: app.get(getModelToken('HotLead')),
       UserLead: app.get(getModelToken('UserLead')),
       User: app.get(getModelToken('User')),
       Activity: app.get(getModelToken('LeadActivity')),
@@ -444,6 +449,470 @@ describeDb('/campaigns', () => {
       expect(String(after.campaign)).toBe(cid);
       expect(after.campaign_round).toBe(1);
       expect(after.status).toBe('RINGING');
+    });
+  });
+
+  describe('hot lead campaigns', () => {
+    const startHot = (body: any = {}, who = 'adminA') =>
+      call(who, 'post', '/campaigns', { name: 'Hot one', staff: ids(staff, 4), count: 12, lead_type: 'HOT', ...body });
+    const next = (cid: string) => call('adminA', 'post', `/campaigns/${cid}/next-round`);
+
+    it('takes the leads from the hot pool, leaves the normal pool alone, and hands them out as hot', async () => {
+      await fillHotPool(12);
+      await fillPool(7);
+      const res = await startHot();
+      expect(res.status).toBe(201);
+      expect(res.body.leads).toBe(12);
+      expect(await m.HotLead.countDocuments({ branch: A })).toBe(0);
+      expect(await m.Lead.countDocuments({ branch: A })).toBe(7);
+      const rows: any[] = await m.UserLead.find({ campaign: res.body._id }).lean();
+      expect(rows.length).toBe(12);
+      expect(rows.every((r) => r.is_hot_lead === true && r.status === 'FRESH' && String(r.branch) === String(A))).toBe(true);
+      for (const s of staff.slice(0, 4)) {
+        expect(await m.UserLead.countDocuments({ user: s._id, campaign: res.body._id })).toBe(3);
+      }
+      expect(await m.Activity.countDocuments({ type: 'ASSIGNED' })).toBe(12);
+    });
+
+    it('a normal campaign is unchanged: normal pool only, rows not hot', async () => {
+      await fillHotPool(5);
+      await fillPool(6);
+      const res = await call('adminA', 'post', '/campaigns', { name: 'Plain', staff: ids(staff, 2), count: 6 });
+      expect(res.status).toBe(201);
+      expect(await m.HotLead.countDocuments({ branch: A })).toBe(5);
+      expect(await m.Lead.countDocuments({ branch: A })).toBe(0);
+      const rows: any[] = await m.UserLead.find({ campaign: res.body._id }).lean();
+      expect(rows.every((r) => r.is_hot_lead === false)).toBe(true);
+      const detail = await call('adminA', 'get', `/campaigns/${res.body._id}`);
+      expect(detail.body.lead_type).toBe('NORMAL');
+    });
+
+    it('the type is shown in the list and the opened campaign', async () => {
+      await fillHotPool(4);
+      await fillPool(4, A, 100);
+      const hot = await startHot({ name: 'H', count: 4, staff: ids(staff, 2) });
+      await call('adminA', 'post', '/campaigns', { name: 'N', staff: ids(staff, 2), count: 4 }).expect(201);
+      const list = await call('adminA', 'get', '/campaigns');
+      expect(Object.fromEntries(list.body.map((c: any) => [c.name, c.lead_type]))).toEqual({ H: 'HOT', N: 'NORMAL' });
+      expect((await call('adminA', 'get', `/campaigns/${hot.body._id}`)).body.lead_type).toBe('HOT');
+    });
+
+    it('every round keeps handing out hot leads, nobody gets a number twice, and the status choice works', async () => {
+      await fillHotPool(8);
+      const res = await startHot({ count: 8, staff: ids(staff, 4), move_statuses: ['RINGING', 'FRESH'] });
+      const cid = res.body._id;
+      for (let round = 2; round <= 4; round++) {
+        await m.UserLead.updateMany({ campaign: cid, status: 'FRESH' }, { $set: { status: 'RINGING' } });
+        const out = await next(cid);
+        expect([round, out.status]).toEqual([round, 201]);
+        expect(out.body.moved).toBe(8);
+      }
+      const all: any[] = await m.UserLead.find({ campaign: cid }).lean();
+      expect(all.length).toBe(32);
+      expect(all.every((r) => r.is_hot_lead === true)).toBe(true);
+      const seen = new Set<string>();
+      for (const r of all) {
+        const key = `${r.user}-${r.contact}`;
+        expect(seen.has(key)).toBe(false);
+        seen.add(key);
+      }
+      // a status that was not chosen stays put
+      expect((await next(cid)).status).toBe(409);
+    });
+
+    it('staff find them on My Hot Leads and admins on Assigned Hot Leads, not on the normal pages', async () => {
+      const { UserLeadsService } = await import('src/user-leads/user-leads.service');
+      const userLeads = new UserLeadsService(m.UserLead as any, contacts, (service as any).activity);
+      await fillHotPool(4);
+      await fillPool(4, A, 100);
+      const hot = await startHot({ name: 'Seen', count: 4, staff: ids(staff, 2) });
+      const normal = await call('adminA', 'post', '/campaigns', { name: 'Seen normal', staff: ids(staff, 2), count: 4 });
+      expect(hot.status).toBe(201);
+      expect(normal.status).toBe(201);
+
+      const mine: any = await userLeads.getByUserIdHotLeads(String(staff[0]._id), { page: 0, size: 50 });
+      expect(mine.data.length).toBe(2);
+      expect(mine.data.every((r: any) => String(r.campaign) === String(hot.body._id))).toBe(true);
+      const assignedHot: any = await userLeads.getAssigneddHotLeads('x', { page: 0, size: 50 }, String(A));
+      expect(assignedHot.total).toBe(4);
+      const assignedNormal: any = await userLeads.getAssignedLeads('x', { page: 0, size: 50 }, String(A));
+      expect(assignedNormal.total).toBe(4);
+      expect(assignedNormal.data.every((r: any) => String(r.campaign) === String(normal.body._id))).toBe(true);
+    });
+
+    it('picked leads come only from the hot pool of the same company', async () => {
+      const hotRows: any[] = await fillHotPool(4);
+      const normalRows: any[] = await fillPool(3, A, 100);
+      const otherHot: any[] = await fillHotPool(2, B, 500);
+      const res = await startHot({ name: 'Picked', count: undefined, staff: ids(staff, 2), lead_ids: [...ids(hotRows), ...ids(normalRows), ...ids(otherHot)] });
+      expect(res.status).toBe(201);
+      expect(res.body.leads).toBe(4);
+      expect(res.body.skipped).toBe(5);
+      expect(await m.Lead.countDocuments({ branch: A })).toBe(3);
+      expect(await m.HotLead.countDocuments({ branch: B })).toBe(2);
+    });
+
+    it('a number waiting in both pools: the hot campaign takes only the hot row', async () => {
+      await fillHotPool(3, A, 0);
+      await m.Lead.insertMany((await m.HotLead.find({ branch: A }).lean() as any[]).map((r) => ({ contact: r.contact, mobile: r.mobile, branch: A })));
+      const res = await startHot({ name: 'Both', count: 3, staff: ids(staff, 3) });
+      expect(res.status).toBe(201);
+      expect(await m.HotLead.countDocuments({ branch: A })).toBe(0);
+      expect(await m.Lead.countDocuments({ branch: A })).toBe(3);
+    });
+
+    it('an Excel upload for a hot campaign removes matching rows from the hot pool only', async () => {
+      await fillHotPool(2, A, 0);
+      await m.Lead.insertMany((await m.HotLead.find({ branch: A }).lean() as any[]).map((r) => ({ contact: r.contact, mobile: r.mobile, branch: A })));
+      const out = await service.create(
+        { branch: String(A), actorId: String(id()), actorName: 'adminA' },
+        {
+          name: 'Sheet hot',
+          staff: ids(staff, 2),
+          lead_type: 'HOT',
+          leads: [{ mobile: '9500000000', first_name: 'Asha' }, { mobile: '9500000001' }, { mobile: '9600000000', first_name: 'New' }],
+        },
+      );
+      expect(out.leads).toBe(3);
+      expect(await m.HotLead.countDocuments({ branch: A })).toBe(0); // the 2 waiting rows were used
+      expect(await m.Lead.countDocuments({ branch: A })).toBe(2); // the normal pool is untouched
+      const rows: any[] = await m.UserLead.find({ campaign: out._id }).lean();
+      expect(rows.length).toBe(3);
+      expect(rows.every((r) => r.is_hot_lead === true)).toBe(true);
+      expect(rows.find((r) => r.mobile === '9500000000').name).toBe('Asha');
+    });
+
+    it('the type is checked: Hot / hot / HOT work, anything else is refused', async () => {
+      await fillHotPool(6);
+      for (const [i, value] of ['hot', 'Hot', ' HOT '].entries()) {
+        const res = await call('adminA', 'post', '/campaigns', { name: 'T' + i, staff: ids(staff, 2), count: 1, lead_type: value });
+        expect([value, res.status]).toEqual([value, 201]);
+        expect((await call('adminA', 'get', `/campaigns/${res.body._id}`)).body.lead_type).toBe('HOT');
+      }
+      const before = await m.HotLead.countDocuments({});
+      for (const value of ['WARM', 'both', 5, {}, ['HOT']]) {
+        const res = await call('adminA', 'post', '/campaigns', { name: 'Bad' + JSON.stringify(value), staff: ids(staff, 2), count: 1, lead_type: value });
+        expect([JSON.stringify(value), res.status]).toEqual([JSON.stringify(value), 400]);
+      }
+      expect(await m.HotLead.countDocuments({})).toBe(before);
+      expect(await m.Campaign.countDocuments({ name: /^Bad/ })).toBe(0);
+    });
+
+    it('nothing given means a normal campaign', async () => {
+      await fillPool(2);
+      const res = await call('adminA', 'post', '/campaigns', { name: 'Default', staff: ids(staff, 2), count: 2 });
+      expect((await call('adminA', 'get', `/campaigns/${res.body._id}`)).body.lead_type).toBe('NORMAL');
+      for (const empty of [null, '']) {
+        await fillPool(1, A, 50);
+        const r = await call('adminA', 'post', '/campaigns', { name: 'E' + String(empty), staff: ids(staff, 2), count: 1, lead_type: empty });
+        expect(r.status).toBe(201);
+      }
+    });
+
+    it('an empty hot pool is an error even when the normal pool has leads, and leaves no campaign', async () => {
+      await fillPool(9);
+      const res = await startHot({ name: 'Empty hot' });
+      expect(res.status).toBe(400);
+      expect(res.body.message).toContain('hot leads');
+      expect(await m.Campaign.countDocuments({})).toBe(0);
+      expect(await m.Lead.countDocuments({ branch: A })).toBe(9);
+    });
+
+    it('if handing out fails, the leads go back to the hot pool', async () => {
+      await fillHotPool(6);
+      const spy = jest.spyOn((service as any).activity, 'logAssigned').mockRejectedValueOnce(new Error('boom'));
+      const res = await startHot({ name: 'Fail hot', count: 6, staff: ids(staff, 3) });
+      spy.mockRestore();
+      expect(res.status).toBe(500);
+      expect(await m.HotLead.countDocuments({ branch: A })).toBe(6);
+      expect(await m.Lead.countDocuments({ branch: A })).toBe(0);
+      expect(await m.UserLead.countDocuments({})).toBe(0);
+      await startHot({ name: 'Fail hot', count: 6, staff: ids(staff, 3) }).then((r) => expect(r.status).toBe(201));
+    });
+
+    it('another company\'s admin never touches this company\'s hot pool', async () => {
+      await fillHotPool(4, A, 0);
+      const other = await makeStaff(2, B, 'o');
+      const res = await call('adminB', 'post', '/campaigns', { name: 'Not yours', staff: ids(other), count: 4, lead_type: 'HOT' });
+      expect(res.status).toBe(400);
+      expect(await m.HotLead.countDocuments({ branch: A })).toBe(4);
+    });
+
+    it('an older campaign without a type keeps working as a normal one', async () => {
+      await fillPool(6);
+      const res = await call('adminA', 'post', '/campaigns', { name: 'Old', staff: ids(staff, 3), count: 6 });
+      const cid = res.body._id;
+      await m.Campaign.collection.updateOne({ _id: new Types.ObjectId(cid) }, { $unset: { lead_type: '' } });
+      expect((await call('adminA', 'get', `/campaigns/${cid}`)).body.lead_type).toBe('NORMAL');
+      await m.UserLead.updateMany({ campaign: cid }, { $set: { status: 'RINGING' } });
+      await next(cid).expect(201);
+      const second: any[] = await m.UserLead.find({ campaign: cid, campaign_round: 2 }).lean();
+      expect(second.length).toBe(6);
+      expect(second.every((r) => r.is_hot_lead === false)).toBe(true);
+    });
+
+    it('only admin and superadmin may start one', async () => {
+      await fillHotPool(2);
+      for (const who of ['staffA', 'tlA']) {
+        expect((await startHot({}, who)).status).toBe(403);
+      }
+      expect(await m.HotLead.countDocuments({ branch: A })).toBe(2);
+    });
+  });
+
+  describe('rounds are always started by hand', () => {
+    it('there is no timer: nothing on the service starts a round by itself', () => {
+      const svc: any = app.get(CampaignsService);
+      expect(svc.runDueAutoAssignments).toBeUndefined();
+      expect(Reflect.getMetadataKeys(CampaignsService.prototype.nextRound).filter((k: any) => /schedule/i.test(String(k)))).toEqual([]);
+      // nextRound takes the campaign and who is asking, nothing else
+      expect(CampaignsService.prototype.nextRound.length).toBe(2);
+    });
+
+    it('asking for automatic rounds when creating is ignored: nothing is stored or moved', async () => {
+      await fillPool(8);
+      const res = await call('adminA', 'post', '/campaigns', {
+        name: 'Hands only', staff: ids(staff, 4), count: 8, auto_assignment: true, interval_minutes: 1,
+      });
+      expect(res.status).toBe(201);
+      const stored: any = await m.Campaign.collection.findOne({ name: 'Hands only' });
+      expect(stored.auto_assignment).toBeUndefined();
+      expect(stored.interval_minutes).toBeUndefined();
+      expect(stored.next_assignment_at).toBeUndefined();
+      const detail = await call('adminA', 'get', `/campaigns/${res.body._id}`);
+      expect(detail.body.auto_assignment).toBeUndefined();
+      expect(detail.body.interval_minutes).toBeUndefined();
+      const list = await call('adminA', 'get', '/campaigns');
+      expect(list.body[0].auto_assignment).toBeUndefined();
+      expect(list.body[0].next_assignment_at).toBeUndefined();
+    });
+
+    it('an older campaign that was set to automatic never moves on its own', async () => {
+      await fillPool(8);
+      const res = await call('adminA', 'post', '/campaigns', { name: 'Old auto', staff: ids(staff, 4), count: 8 });
+      const cid = res.body._id;
+      // as it looked while the automatic feature existed: due a minute ago
+      await m.Campaign.collection.updateOne(
+        { _id: new Types.ObjectId(cid) },
+        { $set: { auto_assignment: true, interval_minutes: 1, next_assignment_at: new Date(Date.now() - 60_000) } },
+      );
+      await workEverything(cid);
+      await new Promise((r) => setTimeout(r, 1500));
+      const campaign: any = await m.Campaign.findById(cid).lean();
+      expect(campaign.round).toBe(1);
+      expect(await m.UserLead.countDocuments({ campaign: cid, campaign_round: 2 })).toBe(0);
+      // and the admin can still start the round by hand
+      await call('adminA', 'post', `/campaigns/${cid}/next-round`).expect(201);
+      expect((await m.Campaign.findById(cid).lean() as any).round).toBe(2);
+    });
+
+    it('each press of the button moves exactly one round, whoever and however often', async () => {
+      await fillPool(8);
+      const res = await call('adminA', 'post', '/campaigns', { name: 'Step', staff: ids(staff, 4), count: 8 });
+      const cid = res.body._id;
+      for (let round = 2; round <= 4; round++) {
+        await workEverything(cid);
+        const out = await call('adminA', 'post', `/campaigns/${cid}/next-round`);
+        expect(out.status).toBe(201);
+        expect(out.body.round).toBe(round);
+      }
+      expect((await call('adminA', 'post', `/campaigns/${cid}/next-round`)).status).toBe(409);
+    });
+
+    it('closing a campaign needs nothing else to be switched off', async () => {
+      await fillPool(4);
+      const res = await call('adminA', 'post', '/campaigns', { name: 'Close me', staff: ids(staff, 2), count: 4 });
+      await call('adminA', 'post', `/campaigns/${res.body._id}/close`).expect(201);
+      const stored: any = await m.Campaign.collection.findOne({ name: 'Close me' });
+      expect(stored.status).toBe('COMPLETED');
+      expect(stored.closed_at).toBeInstanceOf(Date);
+    });
+  });
+
+  describe('choosing which statuses move on', () => {
+    const startWith = async (move_statuses?: any, leads = 12, people = 3, name = 'Pick') => {
+      await fillPool(leads);
+      const body: any = { name, staff: ids(staff, people), count: leads };
+      if (move_statuses !== undefined) body.move_statuses = move_statuses;
+      const res = await call('adminA', 'post', '/campaigns', body);
+      return res;
+    };
+    const setStatuses = async (cid: any, statuses: string[]) => {
+      const rows: any[] = await m.UserLead.find({ campaign: cid }).sort({ _id: 1 }).lean();
+      for (let i = 0; i < statuses.length; i++) {
+        await m.UserLead.updateOne({ _id: rows[i]._id }, { $set: { status: statuses[i] } });
+      }
+      return rows;
+    };
+    const next = (cid: string) => call('adminA', 'post', `/campaigns/${cid}/next-round`);
+
+    it('with no choice made, the old behaviour: everything but the finished statuses moves', async () => {
+      const res = await startWith();
+      expect(res.status).toBe(201);
+      const detail = await call('adminA', 'get', `/campaigns/${res.body._id}`);
+      expect(detail.body.move_statuses).toEqual([
+        'FRESH', 'CALLBACK', 'FREE_TRIAL', 'RINGING', 'SWITCHED_OFF', 'NOT_REACHABLE', 'EXPECTED_PAYMENT',
+      ]);
+    });
+
+    it('only the chosen statuses move; the rest stay with their holder', async () => {
+      const res = await startWith(['RINGING', 'SWITCHED_OFF']);
+      const cid = res.body._id;
+      const rows = await setStatuses(cid, ['RINGING', 'RINGING', 'SWITCHED_OFF', 'CALLBACK', 'DEAD', 'PAYMENT_DONE', 'NOT_REACHABLE']);
+      const out = await next(cid);
+      expect(out.status).toBe(201);
+      expect(out.body.moved).toBe(3);
+      expect(out.body.stayed).toBe(7); // callback, not-reachable, and the 5 still not called
+      expect(out.body.finished).toBe(2); // dead and paid are finished, not "stayed"
+      expect(out.body.message).toContain('stayed');
+
+      const moved = await m.UserLead.find({ campaign: cid, campaign_round: 2 }).lean();
+      expect(moved.map((r: any) => String(r.contact)).sort()).toEqual(
+        [rows[0], rows[1], rows[2]].map((r) => String(r.contact)).sort(),
+      );
+      // the others got no second row
+      for (const i of [3, 4, 5, 6]) {
+        expect(await m.UserLead.countDocuments({ campaign: cid, contact: rows[i].contact })).toBe(1);
+      }
+    });
+
+    it('the stayed leads are not finished: they keep their place and can move in a later round', async () => {
+      const res = await startWith(['RINGING']);
+      const cid = res.body._id;
+      const rows = await setStatuses(cid, ['CALLBACK']);
+      await next(cid).expect(201);
+      expect(await m.CampaignLead.countDocuments({ campaign: cid, done: true })).toBe(0);
+      // the holder later rings it again -> it is eligible in round 3
+      await m.UserLead.updateOne({ _id: rows[0]._id }, { $set: { status: 'RINGING' } });
+      const out = await next(cid);
+      expect(out.status).toBe(201);
+      expect(await m.UserLead.countDocuments({ campaign: cid, contact: rows[0].contact })).toBe(2);
+    });
+
+    it('a finished status can be chosen on purpose, and then it moves on', async () => {
+      const res = await startWith(['PAYMENT_DONE']);
+      const cid = res.body._id;
+      const rows = await setStatuses(cid, ['PAYMENT_DONE', 'RINGING']);
+      const out = await next(cid);
+      expect(out.body.moved).toBe(1);
+      expect(out.body.finished).toBe(0);
+      expect(await m.UserLead.countDocuments({ campaign: cid, contact: rows[0].contact })).toBe(2);
+      expect(await m.CampaignLead.countDocuments({ campaign: cid, done: true })).toBe(0);
+    });
+
+    it('choosing "not called yet" (FRESH) moves the leads nobody has touched', async () => {
+      const res = await startWith(['FRESH']);
+      const cid = res.body._id;
+      await setStatuses(cid, ['RINGING', 'RINGING']);
+      const out = await next(cid);
+      expect(out.body.moved).toBe(10);
+      expect(out.body.stayed).toBe(2);
+    });
+
+    it('the choice is kept, shown, and used by every later round', async () => {
+      const res = await startWith(['RINGING']);
+      const cid = res.body._id;
+      expect((await call('adminA', 'get', `/campaigns/${cid}`)).body.move_statuses).toEqual(['RINGING']);
+      await setStatuses(cid, ['RINGING', 'RINGING', 'RINGING']);
+      await next(cid).expect(201);
+      await m.UserLead.updateMany({ campaign: cid, campaign_round: 2 }, { $set: { status: 'CALLBACK' } });
+      const second = await next(cid);
+      expect(second.body.moved).toBe(0);
+    });
+
+    it('applies to every round from the second until the last, and nobody gets a lead twice', async () => {
+      // 4 staff = 4 rounds; only RINGING moves on, each round
+      await fillPool(12);
+      const created = await call('adminA', 'post', '/campaigns', { name: 'AllRounds', staff: ids(staff, 4), count: 12, move_statuses: ['RINGING'] });
+      const cid = created.body._id;
+      const rowsOf = (round: number) => m.UserLead.find({ campaign: cid, campaign_round: round }).sort({ _id: 1 }).lean() as Promise<any[]>;
+      const setAll = async (round: number, statuses: string[]) => {
+        const rows = await rowsOf(round);
+        for (let i = 0; i < rows.length; i++) {
+          await m.UserLead.updateOne({ _id: rows[i]._id }, { $set: { status: statuses[i % statuses.length] } });
+        }
+        return rows;
+      };
+
+      // round 1 -> 2: 12 handed out, 6 ringing, the rest called back
+      await setAll(1, ['RINGING', 'CALLBACK']);
+      const toRound2 = await next(cid);
+      expect(toRound2.body.round).toBe(2);
+      expect(toRound2.body.moved).toBe(6);
+      expect(toRound2.body.stayed).toBe(6);
+
+      // round 2 -> 3: of the 6 that moved, 3 ring again; and one lead that stayed
+      // in round 1 is now ringing with its first holder, so it is eligible again
+      await setAll(2, ['RINGING', 'DEAD']);
+      const callbackRow = (await m.UserLead.find({ campaign: cid, campaign_round: 1, status: 'CALLBACK' }).lean() as any[])[0];
+      await m.UserLead.updateOne({ _id: callbackRow._id }, { $set: { status: 'RINGING' } });
+      const toRound3 = await next(cid);
+      expect(toRound3.body.round).toBe(3);
+      expect(toRound3.body.moved).toBe(4); // 3 that rang again + the one that came back
+      expect(toRound3.body.finished).toBe(3); // the 3 marked dead
+
+      // round 3 -> 4: everything moved keeps ringing
+      await setAll(3, ['RINGING']);
+      const toRound4 = await next(cid);
+      expect(toRound4.body.round).toBe(4);
+      expect(toRound4.body.moved).toBe(4);
+
+      // the campaign is now in its last round
+      const detail = await call('adminA', 'get', `/campaigns/${cid}`);
+      expect(detail.body.round).toBe(4);
+      expect(detail.body.can_next_round).toBe(false);
+      expect(detail.body.move_statuses).toEqual(['RINGING']);
+      expect((await next(cid)).status).toBe(409);
+
+      // nobody was ever given the same number twice
+      const all: any[] = await m.UserLead.find({ campaign: cid }).lean();
+      const seen = new Set<string>();
+      for (const r of all) {
+        const key = `${r.user}-${r.contact}`;
+        expect(seen.has(key)).toBe(false);
+        seen.add(key);
+      }
+    });
+
+    it('works from the Excel upload too (the choice arrives as text)', async () => {
+      const res = await call('adminA', 'post', '/campaigns/import-excel', undefined);
+      expect([400, 201]).toContain(res.status); // no file -> refused, never a crash
+      expect(res.status).toBeLessThan(500);
+      const svc: any = app.get(CampaignsService);
+      expect(svc.cleanMoveStatuses('["RINGING","DEAD"]')).toEqual(['RINGING', 'DEAD']);
+    });
+
+    it('bad choices are refused and nothing is created', async () => {
+      await fillPool(6);
+      const bad: [string, any][] = [
+        ['empty list', []],
+        ['unknown status', ['RINGING', 'LOST_IN_SPACE']],
+        ['not a list', 'RINGING'],
+        ['a number', 5],
+        ['an object', { a: 1 }],
+        ['broken text', '[RINGING'],
+      ];
+      for (const [label, value] of bad) {
+        const res = await call('adminA', 'post', '/campaigns', { name: 'x' + label, staff: ids(staff, 2), count: 3, move_statuses: value });
+        expect([label, res.status]).toEqual([label, 400]);
+      }
+      expect(await m.Campaign.countDocuments({})).toBe(0);
+      expect(await m.Lead.countDocuments({ branch: A })).toBe(6);
+    });
+
+    it('repeats in the choice are ignored', async () => {
+      const res = await startWith(['RINGING', 'RINGING', 'DEAD']);
+      expect((await call('adminA', 'get', `/campaigns/${res.body._id}`)).body.move_statuses).toEqual(['RINGING', 'DEAD']);
+    });
+
+    it('an older campaign without the setting still uses the default', async () => {
+      const res = await startWith();
+      const cid = res.body._id;
+      await m.Campaign.updateOne({ _id: cid }, { $unset: { move_statuses: '' } });
+      await setStatuses(cid, ['RINGING', 'PAYMENT_DONE']);
+      const out = await next(cid);
+      expect(out.body.finished).toBe(1);
+      expect(out.body.moved).toBe(11);
     });
   });
 

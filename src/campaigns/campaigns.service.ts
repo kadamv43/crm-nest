@@ -2,11 +2,9 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
-  Logger,
   NotFoundException,
   OnModuleInit,
 } from '@nestjs/common';
-import { Cron } from '@nestjs/schedule';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { AttendanceService } from 'src/attendance/attendance.service';
@@ -15,12 +13,15 @@ import { attendanceDate } from 'src/common/time.util';
 import { assignMany } from 'src/contacts/assignment.helper';
 import { ContactsService } from 'src/contacts/contacts.service';
 import { LeadActivityService } from 'src/contacts/lead-activity.service';
+import { HotLead } from 'src/hot-leads/hot-lead.schema';
 import { Lead } from 'src/leads/lead.schema';
 import { UserLead } from 'src/user-leads/user-lead.schema';
 import { User } from 'src/users/user.schema';
 import { Campaign, CampaignLead } from './campaign.schema';
 import {
   batchOf,
+  CAMPAIGN_STATUSES,
+  DEFAULT_MOVE_STATUSES,
   FINAL_STATUSES,
   holderIndex,
   MAX_CAMPAIGN_LEADS,
@@ -39,9 +40,11 @@ export interface CreateCampaignInput {
   lead_ids?: any;
   leads?: any;
   count?: any;
-  auto_assignment?: any;
-  interval_minutes?: any;
+  move_statuses?: any;
+  lead_type?: any;
 }
+
+export type LeadType = 'NORMAL' | 'HOT';
 
 const oid = (id: any) => new Types.ObjectId(String(id));
 const chunk = <T>(items: T[], size: number): T[][] => {
@@ -49,15 +52,14 @@ const chunk = <T>(items: T[], size: number): T[][] => {
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
   return out;
 };
-const MAX_AUTO_INTERVAL_MINUTES = 10080;
 
 @Injectable()
 export class CampaignsService implements OnModuleInit {
-  private readonly logger = new Logger(CampaignsService.name);
   constructor(
     @InjectModel(Campaign.name) private readonly campaigns: Model<Campaign>,
     @InjectModel(CampaignLead.name) private readonly campaignLeads: Model<CampaignLead>,
-    @InjectModel(Lead.name) private readonly pool: Model<Lead>,
+    @InjectModel(Lead.name) private readonly normalPool: Model<Lead>,
+    @InjectModel(HotLead.name) private readonly hotPool: Model<HotLead>,
     @InjectModel(UserLead.name) private readonly userLeads: Model<UserLead>,
     @InjectModel(User.name) private readonly users: Model<User>,
     private readonly contacts: ContactsService,
@@ -105,23 +107,46 @@ export class CampaignsService implements OnModuleInit {
     return text;
   }
 
-  private autoAssignmentSettings(input: CreateCampaignInput) {
-    const enabled = input.auto_assignment === true || input.auto_assignment === 'true';
-    if (!enabled) {
-      return { auto_assignment: false, interval_minutes: undefined, next_assignment_at: undefined };
+  /** NORMAL or HOT; nothing given means NORMAL. */
+  private cleanLeadType(value: any): LeadType {
+    if (value === undefined || value === null || value === '') return 'NORMAL';
+    const type = typeof value === 'string' ? value.trim().toUpperCase() : '';
+    if (type !== 'NORMAL' && type !== 'HOT') {
+      throw new BadRequestException('Lead type must be Normal or Hot');
     }
+    return type;
+  }
 
-    const interval = Number(input.interval_minutes);
-    if (!Number.isInteger(interval) || interval < 1 || interval > MAX_AUTO_INTERVAL_MINUTES) {
-      throw new BadRequestException(
-        `Auto assignment interval must be a whole number from 1 to ${MAX_AUTO_INTERVAL_MINUTES} minutes`,
-      );
+  /** The waiting pool a campaign of this type takes its leads from. */
+  private poolOf(type: LeadType): Model<any> {
+    return (type === 'HOT' ? this.hotPool : this.normalPool) as Model<any>;
+  }
+
+  /** Which statuses move on in the next round; nothing given means the default. */
+  private cleanMoveStatuses(value: any): string[] {
+    if (value === undefined || value === null || value === '') {
+      return [...DEFAULT_MOVE_STATUSES];
     }
-    return {
-      auto_assignment: true,
-      interval_minutes: interval,
-      next_assignment_at: new Date(Date.now() + interval * 60_000),
-    };
+    let list = value;
+    if (typeof value === 'string') {
+      try {
+        list = JSON.parse(value);
+      } catch {
+        throw new BadRequestException('The chosen statuses are invalid');
+      }
+    }
+    if (!Array.isArray(list)) {
+      throw new BadRequestException('The chosen statuses are invalid');
+    }
+    const chosen = [...new Set(list.map((s) => String(s)))];
+    const unknown = chosen.filter((s) => !CAMPAIGN_STATUSES.includes(s));
+    if (unknown.length) {
+      throw new BadRequestException(`Unknown status: ${unknown.slice(0, 3).join(', ')}`);
+    }
+    if (chosen.length === 0) {
+      throw new BadRequestException('Choose at least one status to move to the next round');
+    }
+    return chosen;
   }
 
   private async cleanStaff(branch: string, staff: any): Promise<string[]> {
@@ -152,7 +177,8 @@ export class CampaignsService implements OnModuleInit {
   }
 
   /** Takes the leads out of the pool; a lead another admin took meanwhile is skipped. */
-  private async claimFromPool(branch: string, input: CreateCampaignInput) {
+  private async claimFromPool(branch: string, input: CreateCampaignInput, type: LeadType) {
+    const pool = this.poolOf(type);
     const hasIds = input.lead_ids !== undefined && input.lead_ids !== null;
     const hasCount = input.count !== undefined && input.count !== null && input.count !== '';
     const hasUpload = input.leads !== undefined && input.leads !== null;
@@ -163,7 +189,7 @@ export class CampaignsService implements OnModuleInit {
     }
 
     if (hasUpload) {
-      return this.claimUploaded(branch, input.leads);
+      return this.claimUploaded(branch, input.leads, type);
     }
 
     let wanted: any[];
@@ -180,7 +206,7 @@ export class CampaignsService implements OnModuleInit {
       if (ids.length > MAX_CAMPAIGN_LEADS) {
         throw new BadRequestException(`At most ${MAX_CAMPAIGN_LEADS} leads per campaign`);
       }
-      wanted = await this.pool
+      wanted = await pool
         .find({ _id: { $in: ids.map(oid) }, branch: oid(branch) })
         .select('_id')
         .lean()
@@ -193,7 +219,7 @@ export class CampaignsService implements OnModuleInit {
         );
       }
       requested = n;
-      wanted = await this.pool
+      wanted = await pool
         .find({ branch: oid(branch) })
         .sort({ created_at: 1, _id: 1 })
         .limit(n)
@@ -206,7 +232,7 @@ export class CampaignsService implements OnModuleInit {
     for (const group of chunk(wanted, 50)) {
       const rows = await Promise.all(
         group.map((w: any) =>
-          this.pool.findOneAndDelete({ _id: w._id, branch: oid(branch) }).lean().exec(),
+          pool.findOneAndDelete({ _id: w._id, branch: oid(branch) }).lean().exec(),
         ),
       );
       rows.forEach((r) => r && claimed.push(r));
@@ -215,7 +241,8 @@ export class CampaignsService implements OnModuleInit {
   }
 
   /** Resolves uploaded contacts and removes matching rows from the waiting pool. */
-  private async claimUploaded(branch: string, rows: any) {
+  private async claimUploaded(branch: string, rows: any, type: LeadType) {
+    const pool = this.poolOf(type);
     if (!Array.isArray(rows) || rows.length === 0) {
       throw new BadRequestException('The Excel file has no lead rows');
     }
@@ -235,7 +262,7 @@ export class CampaignsService implements OnModuleInit {
     for (const group of chunk(resolved.rows, 50)) {
       const waitingRows = await Promise.all(
         group.map((row: any) =>
-          this.pool
+          pool
             .findOneAndDelete({ branch: oid(branch), contact: row.contact._id })
             .lean()
             .exec(),
@@ -243,7 +270,7 @@ export class CampaignsService implements OnModuleInit {
       );
 
       group.forEach((row: any, index) => {
-        const waiting = waitingRows[index];
+        const waiting: any = waitingRows[index];
         const uploadedName = [
           String(row.row?.first_name ?? '').trim(),
           String(row.row?.last_name ?? '').trim(),
@@ -267,7 +294,8 @@ export class CampaignsService implements OnModuleInit {
   async create(ctx: CampaignContext, input: CreateCampaignInput) {
     const name = this.cleanName(input?.name);
     const staff = await this.cleanStaff(ctx.branch, input?.staff);
-    const autoAssignment = this.autoAssignmentSettings(input);
+    const moveStatuses = this.cleanMoveStatuses(input?.move_statuses);
+    const leadType = this.cleanLeadType(input?.lead_type);
 
     let campaign: any;
     try {
@@ -277,7 +305,8 @@ export class CampaignsService implements OnModuleInit {
         staff: staff.map(oid),
         round: 1,
         created_by: oid(ctx.actorId),
-        ...autoAssignment,
+        move_statuses: moveStatuses,
+        lead_type: leadType,
       });
     } catch (e: any) {
       if (e?.code === 11000) {
@@ -288,13 +317,15 @@ export class CampaignsService implements OnModuleInit {
 
     let claimed: any[] = [];
     try {
-      const taken = await this.claimFromPool(ctx.branch, input);
+      const taken = await this.claimFromPool(ctx.branch, input, leadType);
       claimed = taken.claimed;
       if (claimed.length === 0) {
         throw new BadRequestException(
           input.leads !== undefined && input.leads !== null
             ? 'The Excel file has no valid mobile numbers'
-            : 'There are no leads in the pool to take',
+            : leadType === 'HOT'
+              ? 'There are no hot leads in the pool to take'
+              : 'There are no leads in the pool to take',
         );
       }
 
@@ -326,6 +357,7 @@ export class CampaignsService implements OnModuleInit {
           name: row.name,
           city: row.city,
           user: staff[holderIndex(batchOf(i, staff.length), 1, staff.length)],
+          is_hot_lead: leadType === 'HOT',
           campaign: campaign._id,
           campaign_round: 1,
           assigned_by: ctx.actorName,
@@ -342,18 +374,18 @@ export class CampaignsService implements OnModuleInit {
       };
     } catch (e) {
       // undo everything so no lead is lost: the leads go back to the pool
-      await this.undoCreate(campaign._id, claimed);
+      await this.undoCreate(campaign._id, claimed, leadType);
       throw e;
     }
   }
 
-  private async undoCreate(campaignId: any, claimed: any[]) {
+  private async undoCreate(campaignId: any, claimed: any[], type: LeadType) {
     try {
       await this.userLeads.deleteMany({ campaign: campaignId });
       await this.campaignLeads.deleteMany({ campaign: campaignId });
       await this.campaigns.deleteOne({ _id: campaignId });
       if (claimed.length) {
-        await this.pool.insertMany(claimed, { ordered: false });
+        await this.poolOf(type).insertMany(claimed, { ordered: false });
       }
     } catch {
       /* best effort; the original error is what the caller sees */
@@ -426,9 +458,7 @@ export class CampaignsService implements OnModuleInit {
       staff: r.staff.length,
       total_leads: r.total_leads,
       total_assignments: assigned.get(String(r._id)) ?? 0,
-      auto_assignment: r.auto_assignment ?? false,
-      interval_minutes: r.interval_minutes,
-      next_assignment_at: r.next_assignment_at,
+      lead_type: r.lead_type ?? 'NORMAL',
       created_by: name.get(String(r.created_by)),
       created_at: r.created_at,
     }));
@@ -495,9 +525,10 @@ export class CampaignsService implements OnModuleInit {
       round: campaign.round,
       rounds,
       total_leads: campaign.total_leads,
-      auto_assignment: campaign.auto_assignment ?? false,
-      interval_minutes: campaign.interval_minutes,
-      next_assignment_at: campaign.next_assignment_at,
+      lead_type: campaign.lead_type ?? 'NORMAL',
+      move_statuses: campaign.move_statuses?.length
+        ? campaign.move_statuses
+        : DEFAULT_MOVE_STATUSES,
       created_at: campaign.created_at,
       closed_at: campaign.closed_at,
       finished: Math.max(finished, doneCount),
@@ -521,8 +552,11 @@ export class CampaignsService implements OnModuleInit {
     };
   }
 
-  /** Moves every unfinished lead to the next person in the rotation. */
-  async nextRound(id: string, ctx: CampaignContext, automatic = false) {
+  /**
+   * Moves the leads on to the next person in the rotation. Always started by
+   * an admin pressing the button; nothing starts a round on its own.
+   */
+  async nextRound(id: string, ctx: CampaignContext) {
     const campaign = await this.load(id, ctx.branch);
     const count = campaign.staff.length;
     if (campaign.status !== 'ACTIVE') {
@@ -545,22 +579,10 @@ export class CampaignsService implements OnModuleInit {
 
     // only one click can win the move from round r to r+1
     const nextRound = campaign.round + 1;
-    const now = new Date();
-    const nextAssignmentAt = campaign.auto_assignment && nextRound < count
-      ? new Date(now.getTime() + campaign.interval_minutes * 60_000)
-      : null;
-    const scheduleFilter = automatic
-      ? { auto_assignment: true, next_assignment_at: { $lte: now } }
-      : {};
-    const scheduleUpdate = campaign.auto_assignment
-      ? nextAssignmentAt
-        ? { next_assignment_at: nextAssignmentAt }
-        : { auto_assignment: false, next_assignment_at: null }
-      : {};
     const claimed = await this.campaigns
       .findOneAndUpdate(
-        { _id: campaign._id, status: 'ACTIVE', round: campaign.round, ...scheduleFilter },
-        { $set: { round: nextRound, updated_at: now, ...scheduleUpdate } },
+        { _id: campaign._id, status: 'ACTIVE', round: campaign.round },
+        { $set: { round: nextRound, updated_at: new Date() } },
         { new: true },
       )
       .lean()
@@ -578,52 +600,10 @@ export class CampaignsService implements OnModuleInit {
       // moved leads are skipped the second time)
       await this.campaigns.updateOne(
         { _id: campaign._id, round: campaign.round + 1 },
-        {
-          $set: {
-            round: campaign.round,
-            ...(campaign.auto_assignment
-              ? { auto_assignment: true, next_assignment_at: campaign.next_assignment_at }
-              : {}),
-          },
-        },
+        { $set: { round: campaign.round } },
       );
       throw e;
     }
-  }
-
-  @Cron('* * * * *', { name: 'campaign-auto-assignment', timeZone: 'Asia/Kolkata' })
-  async runDueAutoAssignments() {
-    const now = new Date();
-    const due = await this.campaigns
-      .find({
-        status: 'ACTIVE',
-        auto_assignment: true,
-        next_assignment_at: { $lte: now },
-        $expr: { $lt: ['$round', { $size: '$staff' }] },
-      })
-      .limit(100)
-      .lean()
-      .exec();
-
-    await Promise.all(
-      due.map(async (campaign: any) => {
-        try {
-          await this.nextRound(
-            String(campaign._id),
-            {
-              branch: String(campaign.branch),
-              actorId: String(campaign.created_by),
-              actorName: 'Auto assignment',
-            },
-            true,
-          );
-        } catch (error: any) {
-          if (!(error instanceof ConflictException)) {
-            this.logger.error(`Auto assignment failed for campaign ${campaign._id}: ${error}`);
-          }
-        }
-      }),
-    );
   }
 
   private async moveLeads(campaign: any, nextRound: number, ctx: CampaignContext) {
@@ -636,10 +616,14 @@ export class CampaignsService implements OnModuleInit {
       .lean()
       .exec();
 
+    const moves = new Set<string>(
+      campaign.move_statuses?.length ? campaign.move_statuses : DEFAULT_MOVE_STATUSES,
+    );
     const finishedIds: any[] = [];
     const items: Record<string, any>[] = [];
     let untouchedRetained = 0;
     let alreadyMoved = 0;
+    let stayed = 0;
 
     for (const group of chunk(open, 100)) {
       await Promise.all(
@@ -649,8 +633,11 @@ export class CampaignsService implements OnModuleInit {
             alreadyMoved++; // a retry after a failed attempt
             return;
           }
-          if (row && FINAL_STATUSES.includes(row.status)) {
-            finishedIds.push(lead._id);
+          if (row && !moves.has(row.status)) {
+            // not one of the chosen statuses: it stays with its holder. A
+            // finished lead is also marked done so it is not looked at again.
+            if (FINAL_STATUSES.includes(row.status)) finishedIds.push(lead._id);
+            else stayed++;
             return;
           }
           if (row?.status === 'FRESH') untouchedRetained++;
@@ -662,6 +649,7 @@ export class CampaignsService implements OnModuleInit {
             name: lead.name,
             city: lead.city,
             user: campaign.staff[holderIndex(lead.batch, nextRound, count)],
+            is_hot_lead: campaign.lead_type === 'HOT',
             campaign: campaign._id,
             campaign_round: nextRound,
             assigned_by: ctx.actorName,
@@ -689,8 +677,11 @@ export class CampaignsService implements OnModuleInit {
       round: nextRound,
       moved: items.length + alreadyMoved,
       finished: finishedIds.length,
+      stayed,
       untouched_retained: untouchedRetained,
-      message: `Round ${nextRound}: ${items.length + alreadyMoved} leads moved on, ${finishedIds.length} finished`,
+      message:
+        `Round ${nextRound}: ${items.length + alreadyMoved} leads moved on, ${finishedIds.length} finished` +
+        (stayed ? `, ${stayed} stayed (status not chosen)` : ''),
     };
   }
 
@@ -701,14 +692,7 @@ export class CampaignsService implements OnModuleInit {
     }
     await this.campaigns.updateOne(
       { _id: campaign._id, status: 'ACTIVE' },
-      {
-        $set: {
-          status: 'COMPLETED',
-          closed_at: new Date(),
-          auto_assignment: false,
-          next_assignment_at: null,
-        },
-      },
+      { $set: { status: 'COMPLETED', closed_at: new Date() } },
     );
     return { message: 'Campaign closed', _id: campaign._id };
   }

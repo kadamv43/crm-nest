@@ -101,8 +101,8 @@ export class CampaignsController {
       name: body?.name,
       staff,
       leads: readSheetRows(file),
-      auto_assignment: body?.auto_assignment === 'true',
-      interval_minutes: body?.interval_minutes,
+      move_statuses: body?.move_statuses,
+      lead_type: body?.lead_type,
     });
   }
 

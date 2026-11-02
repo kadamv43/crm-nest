@@ -1142,6 +1142,32 @@ export class UserLeadsService {
     }
   }
 
+  // "Username" box of the assigned lists: only the leads held by people whose
+  // username contains the text, searched inside the same company as the list.
+  // Nobody matching means an empty list, never "everything".
+  private async applyUsernameFilter(
+    query: Record<string, any>,
+    params: any,
+    branch?: string,
+  ) {
+    const text = String(params?.username ?? '').trim().slice(0, 100);
+    if (!text) {
+      return;
+    }
+    const users = this.model.db.models['User'];
+    if (!users) {
+      throw new Error('The user list is not available');
+    }
+    const match: Record<string, any> = {
+      username: new RegExp(escapeRegex(text), 'i'),
+    };
+    if (branch) {
+      match.branch = new Types.ObjectId(branch);
+    }
+    const found = await users.find(match).select('_id').limit(1000).lean();
+    query.user = { $in: found.map((u: any) => u._id) };
+  }
+
   async getAssigneddHotLeads(id: string, params, branch?: string) {
     const size = params.size;
     const skip = params.page * params.size;
@@ -1153,6 +1179,7 @@ export class UserLeadsService {
       query['branch'] = new Types.ObjectId(branch);
     }
     this.applyListFilters(query, params);
+    await this.applyUsernameFilter(query, params, branch);
 
     const now = new Date();
 
@@ -1205,6 +1232,7 @@ export class UserLeadsService {
       query['branch'] = new Types.ObjectId(branch);
     }
     this.applyListFilters(query, params);
+    await this.applyUsernameFilter(query, params, branch);
 
     const now = new Date();
 

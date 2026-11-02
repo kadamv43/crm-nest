@@ -32,14 +32,16 @@ export class Campaign {
   @Prop({ default: 0 })
   total_leads: number;
 
-  @Prop({ type: Boolean, default: false })
-  auto_assignment: boolean;
+  // NORMAL campaigns take leads from the normal pool; HOT ones from the hot
+  // pool, and hand them out as hot leads. Missing on older campaigns = NORMAL.
+  @Prop({ type: String, enum: ['NORMAL', 'HOT'], default: 'NORMAL' })
+  lead_type: 'NORMAL' | 'HOT';
 
-  @Prop({ required: false, min: 1 })
-  interval_minutes?: number;
-
-  @Prop({ required: false })
-  next_assignment_at?: Date;
+  // Leads in these statuses move to the next person when a new round starts;
+  // the others stay with whoever has them. Missing on older campaigns, which
+  // use the default (everything except the finished statuses).
+  @Prop({ type: [String], required: false })
+  move_statuses?: string[];
 
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', required: false })
   created_by?: any;
