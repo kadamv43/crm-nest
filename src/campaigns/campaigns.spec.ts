@@ -9,7 +9,7 @@ import { attendanceDate } from 'src/common/time.util';
 import { ContactsService } from 'src/contacts/contacts.service';
 import { CampaignsModule } from './campaigns.module';
 import { CampaignsService } from './campaigns.service';
-import { batchOf, holderIndex } from './rotation.util';
+import { batchOf, holderIndex, planRound } from './rotation.util';
 
 describe('rotation maths', () => {
   it('every batch meets every person exactly once, and every round is a fair shuffle', () => {
@@ -78,7 +78,7 @@ describeDb('/campaigns', () => {
   };
 
   let staff: any[] = [];
-  const makeStaff = async (n: number, branch = A, prefix = 's') => {
+  const makeStaff = async (n: number, branch = A, prefix = 's', loggedIn = true) => {
     const rows = Array.from({ length: n }, (_, i) => ({
       _id: id(),
       first_name: 'F' + i,
@@ -91,6 +91,9 @@ describeDb('/campaigns', () => {
       role: 'employee',
     }));
     await m.User.insertMany(rows);
+    if (loggedIn) {
+      await m.Attendance.insertMany(rows.map((u) => ({ user: u._id, branch, date: attendanceDate(), first_login_at: new Date(), last_login_at: new Date(), login_count: 1 })));
+    }
     return rows;
   };
   const fillPool = async (n: number, branch = A, start = 0) => {
@@ -283,6 +286,69 @@ describeDb('/campaigns', () => {
       expect(await m.UserLead.countDocuments({})).toBe(0);
       // and the same campaign can be started again
       await call('adminA', 'post', '/campaigns', { name: 'Fail', staff: ids(staff, 3), count: 12 }).expect(201);
+    });
+  });
+
+  describe('the first round only goes to people who are logged in', () => {
+    const make = (people: any[], extra: any = {}) =>
+      call('adminA', 'post', '/campaigns', { name: 'Present', staff: ids(people, people.length), count: 6, ...extra });
+
+    it('someone who is not logged in today is refused, named, and nothing is taken from the pool', async () => {
+      await fillPool(6);
+      const away = await makeStaff(1, A, 'away', false);
+      const res = await make([staff[0], staff[1], away[0]]);
+      expect(res.status).toBe(400);
+      expect(res.body.message).toContain('Not logged in today');
+      expect(res.body.message).toContain('away0');
+      expect(await m.Campaign.countDocuments({})).toBe(0);
+      expect(await m.Lead.countDocuments({ branch: A })).toBe(6);
+      expect(await m.UserLead.countDocuments({})).toBe(0);
+    });
+
+    it('several absent people are all named', async () => {
+      await fillPool(6);
+      const away = await makeStaff(2, A, 'gone', false);
+      const res = await make([staff[0], ...away]);
+      expect(res.body.message).toContain('gone0');
+      expect(res.body.message).toContain('gone1');
+    });
+
+    it('everyone logged in is fine', async () => {
+      await fillPool(6);
+      expect((await make([staff[0], staff[1], staff[2]])).status).toBe(201);
+    });
+
+    it('logged in yesterday does not count', async () => {
+      await fillPool(6);
+      const old = await makeStaff(1, A, 'old', false);
+      await m.Attendance.create({ user: old[0]._id, branch: A, date: '2001-01-01', first_login_at: new Date(), last_login_at: new Date(), login_count: 1 });
+      expect((await make([staff[0], old[0]])).status).toBe(400);
+    });
+
+    it('logging in at another company does not count for this one', async () => {
+      await fillPool(6);
+      const away = await makeStaff(1, A, 'elsewhere', false);
+      await m.Attendance.create({ user: away[0]._id, branch: B, date: attendanceDate(), first_login_at: new Date(), last_login_at: new Date(), login_count: 1 });
+      expect((await make([staff[0], away[0]])).status).toBe(400);
+    });
+
+    it('an Excel upload and a hot campaign follow the same rule', async () => {
+      const away = await makeStaff(1, A, 'xl', false);
+      const sheet = await make([staff[0], away[0]], { count: undefined, leads: [{ mobile: '9700000001' }, { mobile: '9700000002' }] });
+      expect(sheet.status).toBe(400);
+      await fillHotPool(4, A, 0);
+      const hot = await make([staff[0], away[0]], { count: 4, lead_type: 'HOT' });
+      expect(hot.status).toBe(400);
+      expect(await m.HotLead.countDocuments({ branch: A })).toBe(4);
+    });
+
+    it('later rounds are not blocked: an absent person can still be chosen on purpose', async () => {
+      await fillPool(6);
+      const cid = (await make([staff[0], staff[1]])).body._id;
+      const away = await makeStaff(1, A, 'late', false);
+      await m.UserLead.updateMany({ campaign: cid }, { $set: { status: 'RINGING' } });
+      const r = await call('adminA', 'post', '/campaigns/' + cid + '/next-round', { staff: [String(staff[0]._id), String(away[0]._id)] });
+      expect(r.status).toBe(201);
     });
   });
 
@@ -729,13 +795,10 @@ describeDb('/campaigns', () => {
     });
   });
 
-  describe('choosing which statuses move on', () => {
-    const startWith = async (move_statuses?: any, leads = 12, people = 3, name = 'Pick') => {
+  describe('choosing the statuses for each round', () => {
+    const start = async (leads = 12, people = 3, name = 'Pick', extra: any = {}) => {
       await fillPool(leads);
-      const body: any = { name, staff: ids(staff, people), count: leads };
-      if (move_statuses !== undefined) body.move_statuses = move_statuses;
-      const res = await call('adminA', 'post', '/campaigns', body);
-      return res;
+      return call('adminA', 'post', '/campaigns', { name, staff: ids(staff, people), count: leads, ...extra });
     };
     const setStatuses = async (cid: any, statuses: string[]) => {
       const rows: any[] = await m.UserLead.find({ campaign: cid }).sort({ _id: 1 }).lean();
@@ -744,22 +807,24 @@ describeDb('/campaigns', () => {
       }
       return rows;
     };
-    const next = (cid: string) => call('adminA', 'post', `/campaigns/${cid}/next-round`);
+    const next = (cid: string, body: any = {}) => call('adminA', 'post', `/campaigns/${cid}/next-round`, body);
 
-    it('with no choice made, the old behaviour: everything but the finished statuses moves', async () => {
-      const res = await startWith();
+    it('the first hand-out takes no status choice; the window starts from the default', async () => {
+      const res = await start(12, 3, 'First', { move_statuses: ['DEAD'] }); // ignored at creation
       expect(res.status).toBe(201);
       const detail = await call('adminA', 'get', `/campaigns/${res.body._id}`);
       expect(detail.body.move_statuses).toEqual([
         'FRESH', 'CALLBACK', 'FREE_TRIAL', 'RINGING', 'SWITCHED_OFF', 'NOT_REACHABLE', 'EXPECTED_PAYMENT',
       ]);
+      expect(detail.body.history).toEqual([]);
+      const stored: any = await m.Campaign.collection.findOne({ name: 'First' });
+      expect(stored.move_statuses ?? []).toEqual([]); // nothing was stored from the creation request
     });
 
     it('only the chosen statuses move; the rest stay with their holder', async () => {
-      const res = await startWith(['RINGING', 'SWITCHED_OFF']);
-      const cid = res.body._id;
+      const cid = (await start()).body._id;
       const rows = await setStatuses(cid, ['RINGING', 'RINGING', 'SWITCHED_OFF', 'CALLBACK', 'DEAD', 'PAYMENT_DONE', 'NOT_REACHABLE']);
-      const out = await next(cid);
+      const out = await next(cid, { move_statuses: ['RINGING', 'SWITCHED_OFF'] });
       expect(out.status).toBe(201);
       expect(out.body.moved).toBe(3);
       expect(out.body.stayed).toBe(7); // callback, not-reachable, and the 5 still not called
@@ -770,30 +835,30 @@ describeDb('/campaigns', () => {
       expect(moved.map((r: any) => String(r.contact)).sort()).toEqual(
         [rows[0], rows[1], rows[2]].map((r) => String(r.contact)).sort(),
       );
-      // the others got no second row
       for (const i of [3, 4, 5, 6]) {
         expect(await m.UserLead.countDocuments({ campaign: cid, contact: rows[i].contact })).toBe(1);
       }
     });
 
-    it('the stayed leads are not finished: they keep their place and can move in a later round', async () => {
-      const res = await startWith(['RINGING']);
-      const cid = res.body._id;
+    it('a lead that stayed is not finished: it can move in a later round', async () => {
+      const cid = (await start(12, 3)).body._id;
       const rows = await setStatuses(cid, ['CALLBACK']);
-      await next(cid).expect(201);
-      expect(await m.CampaignLead.countDocuments({ campaign: cid, done: true })).toBe(0);
-      // the holder later rings it again -> it is eligible in round 3
+      await next(cid, { move_statuses: ['RINGING'] }).then((r) => {
+        // nothing is ringing yet, so this round has nothing to move
+        expect(r.status).toBe(409);
+      });
       await m.UserLead.updateOne({ _id: rows[0]._id }, { $set: { status: 'RINGING' } });
-      const out = await next(cid);
+      const out = await next(cid, { move_statuses: ['RINGING'] });
       expect(out.status).toBe(201);
+      expect(out.body.moved).toBe(1);
+      expect(await m.CampaignLead.countDocuments({ campaign: cid, done: true })).toBe(0);
       expect(await m.UserLead.countDocuments({ campaign: cid, contact: rows[0].contact })).toBe(2);
     });
 
     it('a finished status can be chosen on purpose, and then it moves on', async () => {
-      const res = await startWith(['PAYMENT_DONE']);
-      const cid = res.body._id;
+      const cid = (await start()).body._id;
       const rows = await setStatuses(cid, ['PAYMENT_DONE', 'RINGING']);
-      const out = await next(cid);
+      const out = await next(cid, { move_statuses: ['PAYMENT_DONE'] });
       expect(out.body.moved).toBe(1);
       expect(out.body.finished).toBe(0);
       expect(await m.UserLead.countDocuments({ campaign: cid, contact: rows[0].contact })).toBe(2);
@@ -801,89 +866,44 @@ describeDb('/campaigns', () => {
     });
 
     it('choosing "not called yet" (FRESH) moves the leads nobody has touched', async () => {
-      const res = await startWith(['FRESH']);
-      const cid = res.body._id;
+      const cid = (await start()).body._id;
       await setStatuses(cid, ['RINGING', 'RINGING']);
-      const out = await next(cid);
+      const out = await next(cid, { move_statuses: ['FRESH'] });
       expect(out.body.moved).toBe(10);
       expect(out.body.stayed).toBe(2);
     });
 
-    it('the choice is kept, shown, and used by every later round', async () => {
-      const res = await startWith(['RINGING']);
-      const cid = res.body._id;
-      expect((await call('adminA', 'get', `/campaigns/${cid}`)).body.move_statuses).toEqual(['RINGING']);
-      await setStatuses(cid, ['RINGING', 'RINGING', 'RINGING']);
-      await next(cid).expect(201);
+    it('each round can have its own statuses, and each choice is kept in the history', async () => {
+      const cid = (await start(12, 4, 'Own')).body._id;
+      await setStatuses(cid, ['RINGING', 'RINGING', 'CALLBACK', 'CALLBACK', 'RINGING', 'RINGING']);
+      await next(cid, { move_statuses: ['RINGING'] }).expect(201);
       await m.UserLead.updateMany({ campaign: cid, campaign_round: 2 }, { $set: { status: 'CALLBACK' } });
-      const second = await next(cid);
-      expect(second.body.moved).toBe(0);
-    });
+      await next(cid, { move_statuses: ['CALLBACK', 'RINGING'] }).expect(201);
 
-    it('applies to every round from the second until the last, and nobody gets a lead twice', async () => {
-      // 4 staff = 4 rounds; only RINGING moves on, each round
-      await fillPool(12);
-      const created = await call('adminA', 'post', '/campaigns', { name: 'AllRounds', staff: ids(staff, 4), count: 12, move_statuses: ['RINGING'] });
-      const cid = created.body._id;
-      const rowsOf = (round: number) => m.UserLead.find({ campaign: cid, campaign_round: round }).sort({ _id: 1 }).lean() as Promise<any[]>;
-      const setAll = async (round: number, statuses: string[]) => {
-        const rows = await rowsOf(round);
-        for (let i = 0; i < rows.length; i++) {
-          await m.UserLead.updateOne({ _id: rows[i]._id }, { $set: { status: statuses[i % statuses.length] } });
-        }
-        return rows;
-      };
-
-      // round 1 -> 2: 12 handed out, 6 ringing, the rest called back
-      await setAll(1, ['RINGING', 'CALLBACK']);
-      const toRound2 = await next(cid);
-      expect(toRound2.body.round).toBe(2);
-      expect(toRound2.body.moved).toBe(6);
-      expect(toRound2.body.stayed).toBe(6);
-
-      // round 2 -> 3: of the 6 that moved, 3 ring again; and one lead that stayed
-      // in round 1 is now ringing with its first holder, so it is eligible again
-      await setAll(2, ['RINGING', 'DEAD']);
-      const callbackRow = (await m.UserLead.find({ campaign: cid, campaign_round: 1, status: 'CALLBACK' }).lean() as any[])[0];
-      await m.UserLead.updateOne({ _id: callbackRow._id }, { $set: { status: 'RINGING' } });
-      const toRound3 = await next(cid);
-      expect(toRound3.body.round).toBe(3);
-      expect(toRound3.body.moved).toBe(4); // 3 that rang again + the one that came back
-      expect(toRound3.body.finished).toBe(3); // the 3 marked dead
-
-      // round 3 -> 4: everything moved keeps ringing
-      await setAll(3, ['RINGING']);
-      const toRound4 = await next(cid);
-      expect(toRound4.body.round).toBe(4);
-      expect(toRound4.body.moved).toBe(4);
-
-      // the campaign is now in its last round
       const detail = await call('adminA', 'get', `/campaigns/${cid}`);
-      expect(detail.body.round).toBe(4);
-      expect(detail.body.can_next_round).toBe(false);
-      expect(detail.body.move_statuses).toEqual(['RINGING']);
-      expect((await next(cid)).status).toBe(409);
-
-      // nobody was ever given the same number twice
-      const all: any[] = await m.UserLead.find({ campaign: cid }).lean();
-      const seen = new Set<string>();
-      for (const r of all) {
-        const key = `${r.user}-${r.contact}`;
-        expect(seen.has(key)).toBe(false);
-        seen.add(key);
-      }
+      expect(detail.body.history.map((h: any) => [h.round, h.move_statuses, h.staff])).toEqual([
+        [2, ['RINGING'], 4],
+        [3, ['CALLBACK', 'RINGING'], 4],
+      ]);
+      expect(detail.body.history[0].moved).toBe(4);
+      expect(detail.body.move_statuses).toEqual(['CALLBACK', 'RINGING']); // the window starts from the last choice
     });
 
-    it('works from the Excel upload too (the choice arrives as text)', async () => {
-      const res = await call('adminA', 'post', '/campaigns/import-excel', undefined);
-      expect([400, 201]).toContain(res.status); // no file -> refused, never a crash
-      expect(res.status).toBeLessThan(500);
-      const svc: any = app.get(CampaignsService);
-      expect(svc.cleanMoveStatuses('["RINGING","DEAD"]')).toEqual(['RINGING', 'DEAD']);
+    it('leaving the statuses out reuses the last choice', async () => {
+      const cid = (await start(12, 4, 'Reuse')).body._id;
+      await setStatuses(cid, ['RINGING', 'RINGING', 'RINGING', 'CALLBACK']);
+      await next(cid, { move_statuses: ['RINGING'] }).expect(201);
+      await m.UserLead.updateMany({ campaign: cid, campaign_round: 2 }, { $set: { status: 'RINGING' } });
+      const again = await next(cid); // no statuses sent
+      expect(again.status).toBe(201);
+      expect(again.body.moved).toBe(3);
+      const detail = await call('adminA', 'get', `/campaigns/${cid}`);
+      expect(detail.body.history[1].move_statuses).toEqual(['RINGING']);
     });
 
-    it('bad choices are refused and nothing is created', async () => {
-      await fillPool(6);
+    it('bad choices are refused and the round does not change', async () => {
+      const cid = (await start()).body._id;
+      await setStatuses(cid, ['RINGING']);
       const bad: [string, any][] = [
         ['empty list', []],
         ['unknown status', ['RINGING', 'LOST_IN_SPACE']],
@@ -893,26 +913,458 @@ describeDb('/campaigns', () => {
         ['broken text', '[RINGING'],
       ];
       for (const [label, value] of bad) {
-        const res = await call('adminA', 'post', '/campaigns', { name: 'x' + label, staff: ids(staff, 2), count: 3, move_statuses: value });
+        const res = await next(cid, { move_statuses: value });
         expect([label, res.status]).toEqual([label, 400]);
       }
-      expect(await m.Campaign.countDocuments({})).toBe(0);
-      expect(await m.Lead.countDocuments({ branch: A })).toBe(6);
+      expect((await m.Campaign.findById(cid).lean() as any).round).toBe(1);
+      expect(await m.UserLead.countDocuments({ campaign: cid, campaign_round: 2 })).toBe(0);
     });
 
     it('repeats in the choice are ignored', async () => {
-      const res = await startWith(['RINGING', 'RINGING', 'DEAD']);
-      expect((await call('adminA', 'get', `/campaigns/${res.body._id}`)).body.move_statuses).toEqual(['RINGING', 'DEAD']);
+      const cid = (await start()).body._id;
+      await setStatuses(cid, ['RINGING']);
+      await next(cid, { move_statuses: ['RINGING', 'RINGING', 'DEAD'] }).expect(201);
+      const detail = await call('adminA', 'get', `/campaigns/${cid}`);
+      expect(detail.body.history[0].move_statuses).toEqual(['RINGING', 'DEAD']);
     });
 
-    it('an older campaign without the setting still uses the default', async () => {
-      const res = await startWith();
-      const cid = res.body._id;
-      await m.Campaign.updateOne({ _id: cid }, { $unset: { move_statuses: '' } });
-      await setStatuses(cid, ['RINGING', 'PAYMENT_DONE']);
+    it('a round where nothing can move is refused with the reason, and does not use up the round', async () => {
+      const cid = (await start()).body._id;
+      await setStatuses(cid, ['CALLBACK', 'CALLBACK']);
+      const out = await next(cid, { move_statuses: ['RINGING'] });
+      expect(out.status).toBe(409);
+      expect(out.body.message).toContain('No lead can move');
+      expect(out.body.message).toContain('not in the chosen statuses');
+      expect((await m.Campaign.findById(cid).lean() as any).round).toBe(1);
+      expect(await m.UserLead.countDocuments({ campaign: cid })).toBe(12);
+    });
+
+    it('an older campaign that had one fixed choice starts the window from it', async () => {
+      const cid = (await start()).body._id;
+      await m.Campaign.collection.updateOne({ _id: new Types.ObjectId(cid) }, { $set: { move_statuses: ['RINGING', 'DEAD'] } });
+      expect((await call('adminA', 'get', `/campaigns/${cid}`)).body.move_statuses).toEqual(['RINGING', 'DEAD']);
+      await setStatuses(cid, ['RINGING', 'DEAD', 'CALLBACK']);
+      const out = await next(cid); // statuses left out -> the old setting
+      expect(out.body.moved).toBe(2);
+    });
+
+    it('runs a whole campaign: statuses chosen on every round from the second', async () => {
+      const cid = (await start(12, 4, 'AllRounds')).body._id;
+      const setAll = async (round: number, statuses: string[]) => {
+        const rows: any[] = await m.UserLead.find({ campaign: cid, campaign_round: round }).sort({ _id: 1 }).lean();
+        for (let i = 0; i < rows.length; i++) {
+          await m.UserLead.updateOne({ _id: rows[i]._id }, { $set: { status: statuses[i % statuses.length] } });
+        }
+      };
+      await setAll(1, ['RINGING', 'CALLBACK']);
+      const r2 = await next(cid, { move_statuses: ['RINGING'] });
+      expect([r2.body.round, r2.body.moved, r2.body.stayed]).toEqual([2, 6, 6]);
+
+      await setAll(2, ['RINGING', 'DEAD']);
+      const callbackRow: any = await m.UserLead.findOne({ campaign: cid, campaign_round: 1, status: 'CALLBACK' }).lean();
+      await m.UserLead.updateOne({ _id: callbackRow._id }, { $set: { status: 'RINGING' } });
+      const r3 = await next(cid, { move_statuses: ['RINGING'] });
+      expect([r3.body.round, r3.body.moved, r3.body.finished]).toEqual([3, 4, 3]);
+
+      await setAll(3, ['RINGING']);
+      const r4 = await next(cid, { move_statuses: ['RINGING'] });
+      expect([r4.body.round, r4.body.moved]).toEqual([4, 4]);
+
+      // the lead that stayed back in round 1 skipped a turn, so it still has one person to visit
+      await setAll(4, ['RINGING']);
+      const r5 = await next(cid, { move_statuses: ['RINGING'] });
+      expect([r5.status, r5.body.moved]).toEqual([201, 1]);
+      await m.UserLead.updateMany({ campaign: cid, campaign_round: 5 }, { $set: { status: 'RINGING' } });
+
+      // now these four people have had every lead that is still going
+      const r6 = await next(cid, { move_statuses: ['RINGING'] });
+      expect(r6.status).toBe(409);
+
+      const all: any[] = await m.UserLead.find({ campaign: cid }).lean();
+      const seen = new Set<string>();
+      for (const r of all) {
+        const key = `${r.user}-${r.contact}`;
+        expect(seen.has(key)).toBe(false);
+        seen.add(key);
+      }
+    });
+  });
+
+  describe('choosing the staff for each round', () => {
+    const start = async (leads = 12, people = 3, name = 'People') => {
+      await fillPool(leads);
+      return (await call('adminA', 'post', '/campaigns', { name, staff: ids(staff, people), count: leads })).body._id as string;
+    };
+    const workAll = (cid: string) => m.UserLead.updateMany({ campaign: cid, status: 'FRESH' }, { $set: { status: 'RINGING' } });
+    const next = (cid: string, body: any = {}) => call('adminA', 'post', `/campaigns/${cid}/next-round`, body);
+    const noRepeats = async (cid: string) => {
+      const all: any[] = await m.UserLead.find({ campaign: cid }).lean();
+      const seen = new Set<string>();
+      for (const r of all) {
+        const key = `${r.user}-${r.contact}`;
+        expect(seen.has(key)).toBe(false);
+        seen.add(key);
+      }
+    };
+    const perStaff = async (cid: string, round: number) => {
+      const out: Record<string, number> = {};
+      for (const r of (await m.UserLead.find({ campaign: cid, campaign_round: round }).lean()) as any[]) {
+        out[String(r.user)] = (out[String(r.user)] ?? 0) + 1;
+      }
+      return out;
+    };
+
+    it('other people can take part in a later round, and the campaign remembers them', async () => {
+      const cid = await start(12, 3);
+      await workAll(cid);
+      const out = await next(cid, { staff: ids(staff.slice(3, 6)) });
+      expect(out.status).toBe(201);
+      expect(out.body.moved).toBe(12);
+      const counts = await perStaff(cid, 2);
+      expect(Object.keys(counts).sort()).toEqual(ids(staff.slice(3, 6)).sort());
+      expect(Object.values(counts)).toEqual([4, 4, 4]); // a level load
+      await noRepeats(cid);
+      const detail = await call('adminA', 'get', `/campaigns/${cid}`);
+      expect(detail.body.staff.map((s: any) => s.username).sort()).toEqual(['s0', 's1', 's2', 's3', 's4', 's5']);
+      expect(detail.body.history[0].staff).toBe(3);
+    });
+
+    it('someone absent is simply left out: the others share the leads evenly', async () => {
+      const cid = await start(12, 4);
+      await workAll(cid);
+      const out = await next(cid, { staff: ids(staff, 4).filter((_, i) => i !== 1) }); // s1 is away
+      expect(out.status).toBe(201);
+      expect(out.body.moved + out.body.no_candidate).toBe(12);
+      const counts = await perStaff(cid, 2);
+      expect(Object.keys(counts)).not.toContain(String(staff[1]._id));
+      const sizes = Object.values(counts);
+      expect(Math.max(...sizes) - Math.min(...sizes)).toBeLessThanOrEqual(1);
+      await noRepeats(cid);
+    });
+
+    it('a single person can take a round', async () => {
+      const cid = await start(12, 3);
+      await workAll(cid);
+      const out = await next(cid, { staff: [String(staff[7]._id)] });
+      expect(out.body.moved).toBe(12);
+      expect(await m.UserLead.countDocuments({ campaign: cid, user: staff[7]._id, campaign_round: 2 })).toBe(12);
+    });
+
+    it('a lead nobody chosen can take stays put, and the answer says how many', async () => {
+      const cid = await start(12, 3); // s0 holds 4 leads
+      await workAll(cid);
+      const out = await next(cid, { staff: [String(staff[0]._id)] });
+      expect(out.status).toBe(201);
+      expect(out.body.moved).toBe(8);
+      expect(out.body.no_candidate).toBe(4); // the ones s0 already had
+      expect(out.body.message).toContain('everyone chosen already had them');
+      await noRepeats(cid);
+    });
+
+    it('if everyone chosen has had everything, the round is refused and nothing changes', async () => {
+      const cid = await start(12, 3);
+      await workAll(cid);
+      await next(cid, { staff: ids(staff, 3) }).expect(201); // the circle, round 2
+      await workAll(cid);
+      await next(cid, { staff: ids(staff, 3) }).expect(201); // round 3
+      await workAll(cid);
+      const out = await next(cid, { staff: ids(staff, 3) });
+      expect(out.status).toBe(409);
+      expect(out.body.message).toContain('already had by everyone chosen');
+      expect((await m.Campaign.findById(cid).lean() as any).round).toBe(3);
+    });
+
+    it('with the same people every time it is still the plain circle', async () => {
+      const cid = await start(12, 4);
+      const before: any[] = await m.UserLead.find({ campaign: cid, user: staff[0]._id }).lean();
+      await workAll(cid);
+      // the order the staff are sent in does not matter
+      await next(cid, { staff: ids(staff, 4).reverse() }).expect(201);
+      const moved: any[] = await m.UserLead.find({ campaign: cid, user: staff[1]._id, campaign_round: 2 }).lean();
+      expect(moved.map((r) => String(r.contact)).sort()).toEqual(before.map((r) => String(r.contact)).sort());
+    });
+
+    it('leaving the staff out means the campaign\'s own people', async () => {
+      const cid = await start(12, 3);
+      await workAll(cid);
       const out = await next(cid);
-      expect(out.body.finished).toBe(1);
-      expect(out.body.moved).toBe(11);
+      expect(out.status).toBe(201);
+      expect(Object.keys(await perStaff(cid, 2)).sort()).toEqual(ids(staff, 3).sort());
+    });
+
+    it('bad staff are refused and the round does not change', async () => {
+      const cid = await start(12, 3);
+      await workAll(cid);
+      const other = await makeStaff(2, B, 'o');
+      const tl = await m.User.create({ first_name: 'T', last_name: 'L', email: 'tl@x.com', username: 'tl', password: 'x', password_text: 'x', branch: A, role: 'teamlead' });
+      const bad: [string, any][] = [
+        ['empty', []],
+        ['not a list', 'abc'],
+        ['not an id', ['abc']],
+        ['another company', [String(other[0]._id)]],
+        ['a team lead', [String(tl._id)]],
+        ['too many', [...ids(staff), ...ids(await makeStaff(45, A, 'z'))]],
+      ];
+      for (const [label, value] of bad) {
+        const res = await next(cid, { staff: value });
+        expect([label, res.status]).toEqual([label, 400]);
+      }
+      expect((await m.Campaign.findById(cid).lean() as any).round).toBe(1);
+      expect(await m.UserLead.countDocuments({ campaign: cid, campaign_round: 2 })).toBe(0);
+    });
+
+    it('the same person listed twice counts once', async () => {
+      const cid = await start(12, 3);
+      await workAll(cid);
+      const who = String(staff[8]._id);
+      const out = await next(cid, { staff: [who, who] });
+      expect(out.status).toBe(201);
+      expect(Object.keys(await perStaff(cid, 2))).toEqual([who]);
+    });
+
+    it('the campaign can go on until everyone in the company has had every lead, then it says so', async () => {
+      // a company of just 4 employees
+      await m.User.deleteMany({ _id: { $nin: staff.slice(0, 4).map((s) => s._id) } });
+      const cid = await start(8, 2);
+      expect((await call('adminA', 'get', `/campaigns/${cid}`)).body.can_next_round).toBe(true);
+      await workAll(cid);
+      await next(cid, { staff: ids(staff, 2) }).expect(201); // s0 and s1 swap
+      await workAll(cid);
+      expect((await call('adminA', 'get', `/campaigns/${cid}`)).body.can_next_round).toBe(true); // s2, s3 have had nothing
+      await next(cid, { staff: ids(staff.slice(2, 4)) }).expect(201);
+      await workAll(cid);
+      // each lead went to only one of s2 / s3, so they swap
+      await next(cid, { staff: ids(staff.slice(2, 4)) }).then((r) => expect(r.status).toBe(201));
+      await workAll(cid);
+      await next(cid, { staff: ids(staff.slice(2, 4)) }).then((r) => expect(r.status).toBe(409));
+      const detail = await call('adminA', 'get', `/campaigns/${cid}`);
+      expect(detail.body.can_next_round).toBe(false);
+      expect(detail.body.movable_leads).toBe(0);
+      await noRepeats(cid);
+    });
+
+    it('hot campaigns keep handing out hot leads whoever is chosen', async () => {
+      await fillHotPool(6);
+      const cid = (await call('adminA', 'post', '/campaigns', { name: 'HotPeople', staff: ids(staff, 2), count: 6, lead_type: 'HOT' })).body._id;
+      await workAll(cid);
+      await next(cid, { staff: ids(staff.slice(2, 4)) }).expect(201);
+      const second: any[] = await m.UserLead.find({ campaign: cid, campaign_round: 2 }).lean();
+      expect(second.length).toBe(6);
+      expect(second.every((r) => r.is_hot_lead === true)).toBe(true);
+    });
+
+    it('only admin and superadmin may start a round', async () => {
+      const cid = await start(6, 2);
+      for (const who of ['staffA', 'tlA']) {
+        expect((await call(who, 'post', `/campaigns/${cid}/next-round`, { staff: ids(staff, 2) })).status).toBe(403);
+      }
+      expect((await call('adminB', 'post', `/campaigns/${cid}/next-round`, { staff: ids(staff, 2) })).status).toBe(404);
+    });
+  });
+
+  describe('finishing by itself', () => {
+    const start = async (leads: number, people: number) => {
+      await fillPool(leads);
+      return (await call('adminA', 'post', '/campaigns', { name: 'Auto', staff: ids(staff, people), count: leads })).body._id as string;
+    };
+    const workAll = (cid: string, status = 'RINGING') => m.UserLead.updateMany({ campaign: cid, status: 'FRESH' }, { $set: { status } });
+    const next = (cid: string, body: any = {}) => call('adminA', 'post', '/campaigns/' + cid + '/next-round', body);
+    const onlyTwoEmployees = () => m.User.deleteMany({ _id: { $nin: staff.slice(0, 2).map((s) => s._id) } });
+
+    it('closes by itself on the round after which nobody has anything left to receive', async () => {
+      await onlyTwoEmployees();
+      const cid = await start(6, 2);
+      await workAll(cid);
+      const r2 = await next(cid);
+      expect(r2.status).toBe(201);
+      expect(r2.body.closed).toBe(true);
+      expect(r2.body.message).toContain('campaign is now closed');
+
+      const detail = (await call('adminA', 'get', '/campaigns/' + cid)).body;
+      expect(detail.status).toBe('COMPLETED');
+      expect(detail.closed_at).toBeTruthy();
+      expect(detail.can_next_round).toBe(false);
+      expect(detail.history).toHaveLength(1);
+      expect(detail.history[0].moved).toBe(6);
+    });
+
+    it('a closed campaign refuses another round and another close', async () => {
+      await onlyTwoEmployees();
+      const cid = await start(4, 2);
+      await workAll(cid);
+      await next(cid);
+      expect((await next(cid)).status).toBe(409);
+      expect((await call('adminA', 'post', '/campaigns/' + cid + '/close')).status).toBe(409);
+    });
+
+    it('keeps going while anyone in the company still has not had some lead', async () => {
+      await m.User.deleteMany({ _id: { $nin: staff.slice(0, 4).map((s) => s._id) } });
+      const cid = await start(8, 2);
+      await workAll(cid);
+      const r2 = await next(cid, { staff: ids(staff, 2) });
+      expect(r2.status).toBe(201);
+      expect(r2.body.closed).toBe(false);
+      expect((await call('adminA', 'get', '/campaigns/' + cid)).body.status).toBe('ACTIVE');
+    });
+
+    it('finished leads count as done: a mix of paid and moved leads also closes it', async () => {
+      await onlyTwoEmployees();
+      const cid = await start(6, 2);
+      const rows = await m.UserLead.find({ campaign: cid }).sort({ _id: 1 });
+      await m.UserLead.updateOne({ _id: rows[0]._id }, { $set: { status: 'PAYMENT_DONE' } });
+      await m.UserLead.updateOne({ _id: rows[1]._id }, { $set: { status: 'DEAD' } });
+      await workAll(cid);
+      const r2 = await next(cid);
+      expect(r2.body.closed).toBe(true);
+      expect(r2.body.finished).toBe(2);
+      expect((await call('adminA', 'get', '/campaigns/' + cid)).body.status).toBe('COMPLETED');
+    });
+
+    it('a round where some leads stay (status not chosen) does not close while those can still move', async () => {
+      await onlyTwoEmployees();
+      const cid = await start(6, 2);
+      const rows = await m.UserLead.find({ campaign: cid }).sort({ _id: 1 });
+      await m.UserLead.updateMany({ _id: { $in: rows.slice(0, 3).map((r) => r._id) } }, { $set: { status: 'RINGING' } });
+      const r2 = await next(cid, { move_statuses: ['RINGING'] });
+      expect(r2.status).toBe(201);
+      expect(r2.body.closed).toBe(false); // the 3 untouched leads have only been held once
+      expect((await call('adminA', 'get', '/campaigns/' + cid)).body.can_next_round).toBe(true);
+    });
+
+    it('closing by itself leaves the leads and report as they were', async () => {
+      await onlyTwoEmployees();
+      const cid = await start(4, 2);
+      await workAll(cid);
+      await next(cid);
+      expect(await m.UserLead.countDocuments({ campaign: cid })).toBe(8);
+      expect(await m.UserLead.countDocuments({ campaign: cid, campaign_round: 2 })).toBe(4);
+    });
+  });
+
+  describe('planRound (who takes which lead)', () => {
+    const lead = (key: string, batch: number, held: string[] = []) => ({ key, batch, held: new Set(held) });
+    const counts = (plan: { assign: Map<string, string> }) => {
+      const c: Record<string, number> = {};
+      plan.assign.forEach((who) => (c[who] = (c[who] ?? 0) + 1));
+      return c;
+    };
+
+    it('nobody gets a lead they already held', () => {
+      const leads = Array.from({ length: 20 }, (_, i) => lead('l' + i, i % 4, ['s' + (i % 4)]));
+      const plan = planRound(leads, ['s0', 's1', 's2', 's3'], 2);
+      leads.forEach((l) => expect(l.held.has(plan.assign.get(l.key)!)).toBe(false));
+      expect(plan.unplaced).toEqual([]);
+    });
+
+    it('the same people give the plain circle', () => {
+      const staffIds = ['a', 'b', 'c', 'd'];
+      const leads = Array.from({ length: 8 }, (_, i) => lead('l' + i, i % 4, [staffIds[i % 4]]));
+      const plan = planRound(leads, staffIds, 2);
+      leads.forEach((l) => expect(plan.assign.get(l.key)).toBe(staffIds[(l.batch + 1) % 4]));
+    });
+
+    it('a smaller group still gets an even share', () => {
+      const leads = Array.from({ length: 30 }, (_, i) => lead('l' + i, i % 10));
+      const plan = planRound(leads, ['a', 'b', 'c'], 2);
+      expect(Object.values(counts(plan))).toEqual([10, 10, 10]);
+    });
+
+    it('uneven numbers differ by at most one', () => {
+      const leads = Array.from({ length: 31 }, (_, i) => lead('l' + i, i % 7));
+      const sizes = Object.values(counts(planRound(leads, ['a', 'b', 'c', 'd', 'e'], 3)));
+      expect(Math.max(...sizes) - Math.min(...sizes)).toBeLessThanOrEqual(1);
+    });
+
+    it('a lead with only one possible taker is never crowded out', () => {
+      const leads = [
+        lead('forced1', 0, ['b']),
+        lead('forced2', 1, ['b']),
+        lead('free1', 2),
+        lead('free2', 3),
+      ];
+      const plan = planRound(leads, ['a', 'b'], 2);
+      expect(plan.assign.get('forced1')).toBe('a');
+      expect(plan.assign.get('forced2')).toBe('a');
+      expect(plan.assign.get('free1')).toBe('b');
+      expect(plan.assign.get('free2')).toBe('b');
+    });
+
+    it('a lead everyone has held is returned unplaced', () => {
+      const plan = planRound([lead('x', 0, ['a', 'b']), lead('y', 1, ['a'])], ['a', 'b'], 2);
+      expect(plan.unplaced).toEqual(['x']);
+      expect(plan.assign.get('y')).toBe('b');
+    });
+
+    it('no staff at all places nothing', () => {
+      const plan = planRound([lead('x', 0)], [], 2);
+      expect(plan.unplaced).toEqual(['x']);
+      expect(plan.assign.size).toBe(0);
+    });
+
+    it('is repeatable: the same input gives the same answer', () => {
+      const leads = Array.from({ length: 25 }, (_, i) => lead('l' + i, i % 5, i % 2 ? ['a'] : []));
+      const one = planRound(leads, ['a', 'b', 'c'], 2);
+      const two = planRound(leads, ['a', 'b', 'c'], 2);
+      expect([...one.assign.entries()]).toEqual([...two.assign.entries()]);
+    });
+
+    it('the biggest campaign (10,000 leads, 50 people) is planned in a moment', () => {
+      const staffIds = Array.from({ length: 50 }, (_, i) => 's' + i);
+      const leads = Array.from({ length: 10000 }, (_, i) => lead('l' + i, i % 50, [staffIds[i % 50]]));
+      const started = Date.now();
+      const plan = planRound(leads, staffIds, 2);
+      expect(Date.now() - started).toBeLessThan(3000);
+      expect(plan.unplaced).toEqual([]);
+      expect(new Set(Object.values(counts(plan))).size).toBe(1); // 200 each
+      // and with a third of the people away
+      const some = staffIds.filter((_, i) => i % 3 !== 0);
+      const started2 = Date.now();
+      const part = planRound(leads, some, 2);
+      expect(Date.now() - started2).toBeLessThan(5000);
+      const sizes = Object.values(counts(part));
+      expect(Math.max(...sizes) - Math.min(...sizes)).toBeLessThanOrEqual(1);
+    });
+
+    it('random situations: never a repeat, every lead placed or reported, a level load when it can be', () => {
+      let seed = 12345;
+      const random = () => ((seed = (seed * 1664525 + 1013904223) % 4294967296) / 4294967296);
+      for (let trial = 0; trial < 200; trial++) {
+        const people = 1 + Math.floor(random() * 8);
+        const everyone = Array.from({ length: 9 }, (_, i) => 'p' + i);
+        const chosen = everyone.filter(() => random() < people / 9).slice(0, people);
+        if (chosen.length === 0) continue;
+        const total = 1 + Math.floor(random() * 40);
+        const leads = Array.from({ length: total }, (_, i) =>
+          lead('l' + i, Math.floor(random() * 9), everyone.filter(() => random() < 0.3)),
+        );
+        const plan = planRound(leads, chosen, 2 + Math.floor(random() * 5));
+        expect(plan.assign.size + plan.unplaced.length).toBe(total);
+        leads.forEach((l) => {
+          const who = plan.assign.get(l.key);
+          if (who) {
+            expect(chosen).toContain(who);
+            expect(l.held.has(who)).toBe(false);
+          } else {
+            expect(chosen.every((c) => l.held.has(c))).toBe(true); // only when nobody chosen could take it
+          }
+        });
+        // when nothing is held, the load must be level
+        const free = leads.map((l) => lead(l.key, l.batch));
+        const level = Object.values(counts(planRound(free, chosen, 2)));
+        expect(Math.max(...level) - Math.min(...level)).toBeLessThanOrEqual(1);
+      }
+    });
+
+    it('every full circle of 10 people over 10 rounds is exact', () => {
+      const staffIds = Array.from({ length: 10 }, (_, i) => 's' + i);
+      const leads = Array.from({ length: 100 }, (_, i) => lead('l' + i, i % 10, [staffIds[i % 10]]));
+      for (let round = 2; round <= 10; round++) {
+        const plan = planRound(leads, staffIds, round);
+        expect(plan.unplaced).toEqual([]);
+        expect(Object.values(counts(plan))).toEqual(new Array(10).fill(10));
+        leads.forEach((l) => l.held.add(plan.assign.get(l.key)!));
+      }
+      leads.forEach((l) => expect(l.held.size).toBe(10));
     });
   });
 
@@ -926,7 +1378,7 @@ describeDb('/campaigns', () => {
 
       const res = await call('adminA', 'get', `/campaigns/${cid}`);
       expect(res.status).toBe(200);
-      expect(res.body).toMatchObject({ name: 'Detail', round: 1, rounds: 3, total_leads: 12, finished: 1, untouched: 10, can_next_round: true, status: 'ACTIVE' });
+      expect(res.body).toMatchObject({ name: 'Detail', round: 1, total_leads: 12, finished: 1, untouched: 10, can_next_round: true, status: 'ACTIVE' });
       expect(res.body.statuses).toEqual({ FRESH: 10, PAYMENT_DONE: 1, RINGING: 1 });
       expect(res.body.staff.length).toBe(3);
       expect(res.body.staff[0]).toMatchObject({ username: 's0', holding: 4, untouched: 2, assigned_total: 4, worked_total: 2 });
@@ -936,7 +1388,7 @@ describeDb('/campaigns', () => {
       await workEverything(cid);
       await call('adminA', 'post', `/campaigns/${cid}/next-round`).expect(201);
       const last = await call('adminA', 'get', `/campaigns/${cid}`);
-      expect(last.body.can_next_round).toBe(false);
+      expect(last.body.can_next_round).toBe(true); // 7 more people in the company have not had them
       expect(last.body.round).toBe(3);
     });
 
@@ -950,10 +1402,11 @@ describeDb('/campaigns', () => {
       await call('adminB', 'post', '/campaigns', { name: 'Theirs', staff: ids(other), count: 2 }).expect(201);
       const res = await call('adminA', 'get', '/campaigns');
       expect(res.body.map((c: any) => c.name)).toEqual(['Two', 'One']);
-      expect(res.body[0]).toMatchObject({ rounds: 3, round: 1, total_leads: 3, created_by: "adminA" });
+      expect(res.body[0]).toMatchObject({ round: 1, total_leads: 3, created_by: "adminA" });
     });
 
     it('staff list marks who logged in today', async () => {
+      await m.Attendance.deleteMany({});
       await m.Attendance.create({ user: staff[2]._id, branch: A, date: attendanceDate(), first_login_at: new Date(), last_login_at: new Date(), login_count: 1 });
       await m.Attendance.create({ user: staff[3]._id, branch: A, date: '2001-01-01', first_login_at: new Date(), last_login_at: new Date(), login_count: 1 });
       await makeStaff(2, B, 'o');

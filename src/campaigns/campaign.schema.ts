@@ -43,6 +43,10 @@ export class Campaign {
   @Prop({ type: [String], required: false })
   move_statuses?: string[];
 
+  // One entry per round after the first: what was chosen and what happened.
+  @Prop({ type: [Object], default: [] })
+  history: Record<string, any>[];
+
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', required: false })
   created_by?: any;
 

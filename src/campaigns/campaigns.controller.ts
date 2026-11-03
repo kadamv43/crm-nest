@@ -111,10 +111,14 @@ export class CampaignsController {
   next(
     @Req() req: Request,
     @Param('id') id: string,
+    @Body() body: any,
     @Query('branch') branch?: string,
   ) {
     const company = this.company(req, branch);
-    return this.service.nextRound(id, this.ctx(req, company));
+    return this.service.nextRound(id, this.ctx(req, company), {
+      staff: body?.staff,
+      move_statuses: body?.move_statuses,
+    });
   }
 
   @Post(':id/close')

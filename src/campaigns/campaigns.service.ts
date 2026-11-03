@@ -24,6 +24,7 @@ import {
   DEFAULT_MOVE_STATUSES,
   FINAL_STATUSES,
   holderIndex,
+  planRound,
   MAX_CAMPAIGN_LEADS,
   MAX_CAMPAIGN_STAFF,
 } from './rotation.util';
@@ -122,10 +123,10 @@ export class CampaignsService implements OnModuleInit {
     return (type === 'HOT' ? this.hotPool : this.normalPool) as Model<any>;
   }
 
-  /** Which statuses move on in the next round; nothing given means the default. */
-  private cleanMoveStatuses(value: any): string[] {
+  /** Which statuses move on in a round; nothing given means `fallback`. */
+  private cleanMoveStatuses(value: any, fallback: string[] = DEFAULT_MOVE_STATUSES): string[] {
     if (value === undefined || value === null || value === '') {
-      return [...DEFAULT_MOVE_STATUSES];
+      return [...fallback];
     }
     let list = value;
     if (typeof value === 'string') {
@@ -149,16 +150,20 @@ export class CampaignsService implements OnModuleInit {
     return chosen;
   }
 
-  private async cleanStaff(branch: string, staff: any): Promise<string[]> {
+  private async cleanStaff(branch: string, staff: any, minimum = 2): Promise<string[]> {
     if (!Array.isArray(staff)) {
-      throw new BadRequestException('Please choose the staff for the campaign');
+      throw new BadRequestException('Please choose the staff');
     }
     const ids = [...new Set(staff.map((s) => String(s)))];
     if (ids.some((id) => !Types.ObjectId.isValid(id))) {
       throw new BadRequestException('One of the staff ids is not valid');
     }
-    if (ids.length < 2) {
-      throw new BadRequestException('Choose at least 2 staff to rotate between');
+    if (ids.length < minimum) {
+      throw new BadRequestException(
+        minimum === 1
+          ? 'Choose at least one staff member for this round'
+          : `Choose at least ${minimum} staff to rotate between`,
+      );
     }
     if (ids.length > MAX_CAMPAIGN_STAFF) {
       throw new BadRequestException(`At most ${MAX_CAMPAIGN_STAFF} staff per campaign`);
@@ -174,6 +179,22 @@ export class CampaignsService implements OnModuleInit {
       );
     }
     return ids;
+  }
+
+  /** The first round only goes to people who are logged in today. */
+  private async requireLoggedIn(branch: string, staff: string[]) {
+    const here = new Set(await this.attendance.loggedInUserIds(attendanceDate(), branch));
+    const away = staff.filter((id) => !here.has(id));
+    if (away.length === 0) return;
+    const people: any[] = await this.users
+      .find({ _id: { $in: away.map(oid) } })
+      .select('first_name last_name username')
+      .lean()
+      .exec();
+    const names = people.map((p) => p.username || `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim());
+    throw new BadRequestException(
+      `Not logged in today: ${names.join(', ')}. Leads can only be given to people who are logged in. Remove them and try again.`,
+    );
   }
 
   /** Takes the leads out of the pool; a lead another admin took meanwhile is skipped. */
@@ -294,8 +315,8 @@ export class CampaignsService implements OnModuleInit {
   async create(ctx: CampaignContext, input: CreateCampaignInput) {
     const name = this.cleanName(input?.name);
     const staff = await this.cleanStaff(ctx.branch, input?.staff);
-    const moveStatuses = this.cleanMoveStatuses(input?.move_statuses);
     const leadType = this.cleanLeadType(input?.lead_type);
+    await this.requireLoggedIn(ctx.branch, staff);
 
     let campaign: any;
     try {
@@ -305,7 +326,6 @@ export class CampaignsService implements OnModuleInit {
         staff: staff.map(oid),
         round: 1,
         created_by: oid(ctx.actorId),
-        move_statuses: moveStatuses,
         lead_type: leadType,
       });
     } catch (e: any) {
@@ -454,7 +474,6 @@ export class CampaignsService implements OnModuleInit {
       name: r.name,
       status: r.status,
       round: r.round,
-      rounds: r.staff.length,
       staff: r.staff.length,
       total_leads: r.total_leads,
       total_assignments: assigned.get(String(r._id)) ?? 0,
@@ -475,7 +494,7 @@ export class CampaignsService implements OnModuleInit {
 
   async detail(id: string, branch: string) {
     const campaign = await this.load(id, branch);
-    const [latest, staffUsers, totals, doneCount] = await Promise.all([
+    const [latest, staffUsers, totals, doneCount, holderSets] = await Promise.all([
       this.latestRows(campaign._id),
       this.users
         .find({ _id: { $in: campaign.staff } })
@@ -496,7 +515,11 @@ export class CampaignsService implements OnModuleInit {
         ])
         .exec(),
       this.campaignLeads.countDocuments({ campaign: campaign._id, done: true }),
+      this.holdersByContact(campaign._id),
     ]);
+    const holders = new Map<string, number>(
+      [...holderSets.entries()].map(([contact, set]) => [contact, set.size]),
+    );
 
     const byUser = new Map(staffUsers.map((u: any) => [String(u._id), u]));
     const totalsBy = new Map(totals.map((t: any) => [String(t._id), t]));
@@ -517,24 +540,35 @@ export class CampaignsService implements OnModuleInit {
       holding.set(String(row.user), slot);
     }
 
-    const rounds = campaign.staff.length;
+    const movable = await this.countMovable(campaign, latest, holders);
+
+    const history = campaign.history ?? [];
     return {
       _id: campaign._id,
       name: campaign.name,
       status: campaign.status,
       round: campaign.round,
-      rounds,
       total_leads: campaign.total_leads,
       lead_type: campaign.lead_type ?? 'NORMAL',
-      move_statuses: campaign.move_statuses?.length
-        ? campaign.move_statuses
-        : DEFAULT_MOVE_STATUSES,
+      // what the next-round window starts with: the last choice made
+      move_statuses: this.lastStatuses(campaign),
+      history: history.map((h: any) => ({
+        round: h.round,
+        move_statuses: h.move_statuses,
+        staff: h.staff_count,
+        moved: h.moved,
+        stayed: h.stayed,
+        no_candidate: h.no_candidate,
+        finished: h.finished,
+        at: h.at,
+      })),
       created_at: campaign.created_at,
       closed_at: campaign.closed_at,
       finished: Math.max(finished, doneCount),
       untouched,
+      movable_leads: movable,
       statuses,
-      can_next_round: campaign.status === 'ACTIVE' && campaign.round < rounds,
+      can_next_round: campaign.status === 'ACTIVE' && movable > 0,
       staff: campaign.staff.map((sid: any) => {
         const u: any = byUser.get(String(sid));
         const h = holding.get(String(sid)) ?? { holding: 0, untouched: 0 };
@@ -552,30 +586,60 @@ export class CampaignsService implements OnModuleInit {
     };
   }
 
+  /** The statuses the next-round window starts with: the last choice, else the old campaign setting, else the default. */
+  private lastStatuses(campaign: any): string[] {
+    const history = campaign.history ?? [];
+    const last = history[history.length - 1]?.move_statuses;
+    if (Array.isArray(last) && last.length) return last;
+    if (campaign.move_statuses?.length) return campaign.move_statuses;
+    return [...DEFAULT_MOVE_STATUSES];
+  }
+
+  /** contact -> everybody who has ever held it in this campaign */
+  private async holdersByContact(campaignId: any): Promise<Map<string, Set<string>>> {
+    const rows = await this.userLeads
+      .aggregate([
+        { $match: { campaign: oid(campaignId) } },
+        { $group: { _id: '$contact', users: { $addToSet: '$user' } } },
+      ])
+      .exec();
+    return new Map(
+      rows.map((r: any) => [String(r._id), new Set<string>(r.users.map((u: any) => String(u)))]),
+    );
+  }
+
   /**
-   * Moves the leads on to the next person in the rotation. Always started by
-   * an admin pressing the button; nothing starts a round on its own.
+   * Moves leads on to new people. Always started by an admin pressing the
+   * button; nothing starts a round on its own. For each round the admin says
+   * which statuses move and which staff take part; leaving them out means
+   * "the same staff as the campaign has" and "the statuses used last time".
    */
-  async nextRound(id: string, ctx: CampaignContext) {
+  async nextRound(
+    id: string,
+    ctx: CampaignContext,
+    input: { staff?: any; move_statuses?: any } = {},
+  ) {
     const campaign = await this.load(id, ctx.branch);
-    const count = campaign.staff.length;
     if (campaign.status !== 'ACTIVE') {
       throw new ConflictException('This campaign is closed');
     }
-    if (campaign.round >= count) {
-      throw new ConflictException(
-        'Every staff member has already had every lead; there is no next round',
-      );
+
+    let chosen: string[];
+    if (input?.staff === undefined || input?.staff === null) {
+      chosen = campaign.staff.map((s: any) => String(s));
+      const stillHere = await this.users.countDocuments({
+        _id: { $in: campaign.staff },
+        branch: oid(ctx.branch),
+      });
+      if (stillHere !== chosen.length) {
+        throw new ConflictException(
+          'One of the staff in this campaign is no longer in the company',
+        );
+      }
+    } else {
+      chosen = await this.cleanStaff(ctx.branch, input.staff, 1);
     }
-    const stillHere = await this.users.countDocuments({
-      _id: { $in: campaign.staff },
-      branch: oid(ctx.branch),
-    });
-    if (stillHere !== count) {
-      throw new ConflictException(
-        'One of the staff in this campaign is no longer in the company',
-      );
-    }
+    const statuses = this.cleanMoveStatuses(input?.move_statuses, this.lastStatuses(campaign));
 
     // only one click can win the move from round r to r+1
     const nextRound = campaign.round + 1;
@@ -594,67 +658,100 @@ export class CampaignsService implements OnModuleInit {
     }
 
     try {
-      return await this.moveLeads(campaign, campaign.round + 1, ctx);
+      return await this.moveLeads(campaign, nextRound, ctx, chosen, statuses);
     } catch (e) {
       // put the round back so the same click can be tried again (already
       // moved leads are skipped the second time)
       await this.campaigns.updateOne(
-        { _id: campaign._id, round: campaign.round + 1 },
+        { _id: campaign._id, round: nextRound },
         { $set: { round: campaign.round } },
       );
       throw e;
     }
   }
 
-  private async moveLeads(campaign: any, nextRound: number, ctx: CampaignContext) {
-    const count = campaign.staff.length;
+  private async moveLeads(
+    campaign: any,
+    nextRound: number,
+    ctx: CampaignContext,
+    chosen: string[],
+    statuses: string[],
+  ) {
     const latest = await this.latestRows(campaign._id);
     const latestBy = new Map(latest.map((l: any) => [String(l._id), l]));
+    const held = await this.holdersByContact(campaign._id);
 
     const open = await this.campaignLeads
       .find({ campaign: campaign._id, done: false })
       .lean()
       .exec();
 
-    const moves = new Set<string>(
-      campaign.move_statuses?.length ? campaign.move_statuses : DEFAULT_MOVE_STATUSES,
-    );
+    const moves = new Set<string>(statuses);
     const finishedIds: any[] = [];
-    const items: Record<string, any>[] = [];
     let untouchedRetained = 0;
     let alreadyMoved = 0;
     let stayed = 0;
+    const movers: any[] = [];
 
-    for (const group of chunk(open, 100)) {
-      await Promise.all(
-        group.map(async (lead: any) => {
-          const row: any = latestBy.get(String(lead.contact));
-          if (row && (row.round ?? 0) >= nextRound) {
-            alreadyMoved++; // a retry after a failed attempt
-            return;
-          }
-          if (row && !moves.has(row.status)) {
-            // not one of the chosen statuses: it stays with its holder. A
-            // finished lead is also marked done so it is not looked at again.
-            if (FINAL_STATUSES.includes(row.status)) finishedIds.push(lead._id);
-            else stayed++;
-            return;
-          }
-          if (row?.status === 'FRESH') untouchedRetained++;
-          // Keep the previous staff member's assignment and add a new fresh
-          // assignment for this round. Lead history belongs to each holder.
-          items.push({
-            contact: lead.contact,
-            mobile: lead.mobile,
-            name: lead.name,
-            city: lead.city,
-            user: campaign.staff[holderIndex(lead.batch, nextRound, count)],
-            is_hot_lead: campaign.lead_type === 'HOT',
-            campaign: campaign._id,
-            campaign_round: nextRound,
-            assigned_by: ctx.actorName,
-          });
-        }),
+    for (const lead of open as any[]) {
+      const row: any = latestBy.get(String(lead.contact));
+      if (row && (row.round ?? 0) >= nextRound) {
+        alreadyMoved++; // a retry after a failed attempt
+        continue;
+      }
+      if (row && !moves.has(row.status)) {
+        // not one of the chosen statuses: it stays with its holder. A
+        // finished lead is also marked done so it is not looked at again.
+        if (FINAL_STATUSES.includes(row.status)) finishedIds.push(lead._id);
+        else stayed++;
+        continue;
+      }
+      if (row?.status === 'FRESH') untouchedRetained++;
+      movers.push(lead);
+    }
+
+    // "next in line" follows the order the people joined the campaign
+    const known = campaign.staff.map((s: any) => String(s));
+    const ordered = [
+      ...known.filter((s: string) => chosen.includes(s)),
+      ...chosen.filter((s) => !known.includes(s)),
+    ];
+    const plan = planRound(
+      movers.map((lead) => ({
+        key: String(lead.contact),
+        batch: lead.batch,
+        held: held.get(String(lead.contact)) ?? new Set<string>(),
+      })),
+      ordered,
+      nextRound,
+    );
+
+    const items: Record<string, any>[] = [];
+    for (const lead of movers) {
+      const who = plan.assign.get(String(lead.contact));
+      if (!who) continue;
+      // Keep the previous holder's row and add a new fresh one for this round.
+      items.push({
+        contact: lead.contact,
+        mobile: lead.mobile,
+        name: lead.name,
+        city: lead.city,
+        user: who,
+        is_hot_lead: campaign.lead_type === 'HOT',
+        campaign: campaign._id,
+        campaign_round: nextRound,
+        assigned_by: ctx.actorName,
+      });
+    }
+    const noCandidate = plan.unplaced.length;
+
+    if (items.length === 0 && alreadyMoved === 0) {
+      const parts = [];
+      if (stayed) parts.push(`${stayed} not in the chosen statuses`);
+      if (noCandidate) parts.push(`${noCandidate} already had by everyone chosen`);
+      if (finishedIds.length) parts.push(`${finishedIds.length} finished`);
+      throw new ConflictException(
+        `No lead can move this round${parts.length ? ': ' + parts.join(', ') : ''}. Change the statuses or the staff.`,
       );
     }
 
@@ -673,16 +770,76 @@ export class CampaignsService implements OnModuleInit {
       items,
     );
 
+    const moved = items.length + alreadyMoved;
+    await this.campaigns.updateOne(
+      { _id: campaign._id },
+      {
+        $addToSet: { staff: { $each: ordered.map(oid) } },
+        $push: {
+          history: {
+            round: nextRound,
+            move_statuses: statuses,
+            staff_count: ordered.length,
+            moved,
+            stayed,
+            no_candidate: noCandidate,
+            finished: finishedIds.length,
+            at: new Date(),
+          },
+        },
+      },
+    );
+
+    const closed = await this.closeIfExhausted(campaign);
+
     return {
       round: nextRound,
-      moved: items.length + alreadyMoved,
+      closed,
+      moved,
       finished: finishedIds.length,
       stayed,
+      no_candidate: noCandidate,
       untouched_retained: untouchedRetained,
       message:
-        `Round ${nextRound}: ${items.length + alreadyMoved} leads moved on, ${finishedIds.length} finished` +
-        (stayed ? `, ${stayed} stayed (status not chosen)` : ''),
+        `Round ${nextRound}: ${moved} leads moved on, ${finishedIds.length} finished` +
+        (stayed ? `, ${stayed} stayed (status not chosen)` : '') +
+        (noCandidate ? `, ${noCandidate} stayed (everyone chosen already had them)` : '') +
+        (closed ? '. Nothing can move any further, so the campaign is now closed' : ''),
     };
+  }
+
+  /** A lead can still move while it is not finished and someone in the company has not held it yet. */
+  private async countMovable(
+    campaign: any,
+    latest: any[],
+    holders: Map<string, number>,
+  ): Promise<number> {
+    const employees = await this.users.countDocuments({
+      branch: campaign.branch,
+      role: Role.Employee,
+    });
+    return latest.filter(
+      (row: any) =>
+        !FINAL_STATUSES.includes(row.status) &&
+        (holders.get(String(row._id)) ?? 0) < employees,
+    ).length;
+  }
+
+  /** Closes the campaign once no lead is able to move any further. */
+  private async closeIfExhausted(campaign: any): Promise<boolean> {
+    const [latest, holderSets] = await Promise.all([
+      this.latestRows(campaign._id),
+      this.holdersByContact(campaign._id),
+    ]);
+    const holders = new Map<string, number>(
+      [...holderSets.entries()].map(([contact, set]) => [contact, set.size]),
+    );
+    if ((await this.countMovable(campaign, latest, holders)) > 0) return false;
+    const res = await this.campaigns.updateOne(
+      { _id: campaign._id, status: 'ACTIVE' },
+      { $set: { status: 'COMPLETED', closed_at: new Date() } },
+    );
+    return res.modifiedCount > 0;
   }
 
   async close(id: string, branch: string) {

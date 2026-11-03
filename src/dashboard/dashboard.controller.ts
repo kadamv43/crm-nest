@@ -27,6 +27,7 @@ export class DashboardController {
   @Get('target-details')
   async getTarget(@Req() req: Request, @Query() query: Record<string, any>) {
     const user = await this.userService.findOne(query?.user);
+    this.vet(req, user, query);
     let total = 0;
     let achieved = 0;
     let pending = 0;
@@ -87,6 +88,7 @@ export class DashboardController {
   ) {
     console.log(query);
     const user = await this.userService.findOne(query?.user);
+    this.vet(req, user, query);
 
     if (user.role == 'superadmin') {
       const users = await this.userService.findByBranch(query?.branch);
@@ -134,6 +136,7 @@ export class DashboardController {
     @Query() query: Record<string, any>,
   ) {
     const user = await this.userService.findOne(query?.user);
+    this.vet(req, user, query);
     if (user.role == 'admin' || user.role == 'superadmin') {
       let users = await this.userService.findByBranch(query?.branch);
       let userIds = users.map((item: any) => {
@@ -244,9 +247,40 @@ export class DashboardController {
     }
   }
 
+  // The address says whose numbers to show and which company; neither may be taken
+  // on trust. The person must be someone the caller may look at, and anyone but the
+  // superadmin is kept inside their own company.
+  private vet(req: any, target: any, query: Record<string, any>) {
+    const viewer = req?.user;
+    if (!viewer) throw new ForbiddenException('Not allowed');
+    this.assertCanView(viewer, target);
+    if (viewer.role !== 'superadmin') {
+      query.branch = String(viewer.branch?._id ?? viewer.branch ?? '');
+    }
+  }
+
+  // For the "today" figures, where naming nobody used to mean everybody.
+  private async vetOptionalUser(req: any, query: Record<string, any>) {
+    const viewer = req?.user;
+    if (!viewer) throw new ForbiddenException('Not allowed');
+    if (!query.user && (viewer.role === 'employee' || viewer.role === 'teamlead')) {
+      query.user = String(viewer.userId);
+    }
+    if (query.user) {
+      if (!Types.ObjectId.isValid(String(query.user))) {
+        throw new BadRequestException('Invalid user');
+      }
+      const target = await this.userService.findOne(query.user);
+      this.vet(req, target, query);
+    } else if (viewer.role !== 'superadmin') {
+      query.branch = String(viewer.branch?._id ?? viewer.branch ?? '');
+    }
+  }
+
   @Get('reports')
   async getReports(@Req() req: Request, @Query() query: Record<string, any>) {
     const user = await this.userService.findOne(query?.user);
+    this.vet(req, user, query);
     const campaignReport = query.campaign_report === 'true';
 
     if (campaignReport) {
@@ -261,6 +295,13 @@ export class DashboardController {
         const userBranch: any = user.branch;
         query.branch = String(userBranch?._id ?? userBranch ?? '');
       }
+    }
+
+    if (campaignReport && (user.role == 'superadmin' || user.role == 'admin')) {
+      // The company is already fixed by the campaigns; do not also limit it to staff
+      // who still exist, or the lines of someone who has left would vanish.
+      delete query.user;
+      return this.userLeadsService.getReports(query);
     }
 
     if (user.role == 'superadmin') {
@@ -296,6 +337,7 @@ export class DashboardController {
     @Req() req: Request,
     @Query() query: Record<string, any>,
   ) {
+    await this.vetOptionalUser(req, query);
     return this.userLeadsService.getTodaysPaymentsDoneData(query);
   }
 
@@ -304,6 +346,7 @@ export class DashboardController {
     @Req() req: Request,
     @Query() query: Record<string, any>,
   ) {
+    await this.vetOptionalUser(req, query);
     return this.userLeadsService.getTodaysExpectedPayment(query);
   }
 }

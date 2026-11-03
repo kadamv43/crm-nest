@@ -989,7 +989,9 @@ export class UserLeadsService {
           ...(campaignReport ? { campaign_name: '$campaignDetails.name' } : {}),
         },
       },
-      { $sort: { created_at: -1 } }, // Changed "desc" to -1 for descending
+      // _id breaks ties: a whole round is handed out in the same instant, and a
+      // sort on time alone would shuffle those rows between pages.
+      { $sort: { created_at: -1, _id: -1 } },
     ];
 
     // If excel param is present, skip pagination
