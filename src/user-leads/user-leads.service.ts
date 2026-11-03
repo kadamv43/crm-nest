@@ -856,6 +856,7 @@ export class UserLeadsService {
     excel?: boolean;
     campaign_report?: string | boolean;
     campaign_id?: string;
+    campaign_round?: string | number;
     campaign_name?: string;
     branch?: string;
     user?: string | string[];
@@ -926,6 +927,14 @@ export class UserLeadsService {
       matchStage['campaign'] = {
         $in: campaigns.map((campaign: any) => campaign._id),
       };
+
+      if (params.campaign_round !== undefined && params.campaign_round !== '') {
+        const campaignRound = Number(params.campaign_round);
+        if (!Number.isInteger(campaignRound) || campaignRound < 1) {
+          throw new BadRequestException('Invalid campaign round');
+        }
+        matchStage['campaign_round'] = campaignRound;
+      }
     }
     console.log('query', matchStage);
 
@@ -976,6 +985,7 @@ export class UserLeadsService {
           is_hot_lead: 1,
           status: 1,
           created_at: 1,
+          ...(campaignReport ? { campaign_round: 1 } : {}),
           ...(campaignReport ? { campaign_name: '$campaignDetails.name' } : {}),
         },
       },
