@@ -289,66 +289,28 @@ describeDb('/campaigns', () => {
     });
   });
 
-  describe('the first round only goes to people who are logged in', () => {
-    const make = (people: any[], extra: any = {}) =>
-      call('adminA', 'post', '/campaigns', { name: 'Present', staff: ids(people, people.length), count: 6, ...extra });
-
-    it('someone who is not logged in today is refused, named, and nothing is taken from the pool', async () => {
+  describe('who can be chosen when starting', () => {
+    it('every employee of the company can be chosen, logged in today or not', async () => {
       await fillPool(6);
-      const away = await makeStaff(1, A, 'away', false);
-      const res = await make([staff[0], staff[1], away[0]]);
+      const away = await makeStaff(2, A, 'away', false);
+      const res = await call('adminA', 'post', '/campaigns', { name: 'Anyone', staff: [String(staff[0]._id), ...away.map((u) => String(u._id))], count: 6 });
+      expect(res.status).toBe(201);
+      expect(await m.UserLead.countDocuments({ campaign: res.body._id })).toBe(6);
+      expect(await m.UserLead.countDocuments({ campaign: res.body._id, user: away[0]._id })).toBe(2);
+    });
+
+    it('the staff list gives everyone, marking who is logged in', async () => {
+      await makeStaff(2, A, 'away', false);
+      const res = await call('adminA', 'get', '/campaigns/staff');
+      expect(res.body).toHaveLength(staff.length + 2);
+      expect(res.body.filter((s: any) => !s.present)).toHaveLength(2);
+    });
+
+    it('still only staff of this company', async () => {
+      await fillPool(4);
+      const other = await makeStaff(1, B, 'other', false);
+      const res = await call('adminA', 'post', '/campaigns', { name: 'Mixed', staff: [String(staff[0]._id), String(other[0]._id)], count: 4 });
       expect(res.status).toBe(400);
-      expect(res.body.message).toContain('Not logged in today');
-      expect(res.body.message).toContain('away0');
-      expect(await m.Campaign.countDocuments({})).toBe(0);
-      expect(await m.Lead.countDocuments({ branch: A })).toBe(6);
-      expect(await m.UserLead.countDocuments({})).toBe(0);
-    });
-
-    it('several absent people are all named', async () => {
-      await fillPool(6);
-      const away = await makeStaff(2, A, 'gone', false);
-      const res = await make([staff[0], ...away]);
-      expect(res.body.message).toContain('gone0');
-      expect(res.body.message).toContain('gone1');
-    });
-
-    it('everyone logged in is fine', async () => {
-      await fillPool(6);
-      expect((await make([staff[0], staff[1], staff[2]])).status).toBe(201);
-    });
-
-    it('logged in yesterday does not count', async () => {
-      await fillPool(6);
-      const old = await makeStaff(1, A, 'old', false);
-      await m.Attendance.create({ user: old[0]._id, branch: A, date: '2001-01-01', first_login_at: new Date(), last_login_at: new Date(), login_count: 1 });
-      expect((await make([staff[0], old[0]])).status).toBe(400);
-    });
-
-    it('logging in at another company does not count for this one', async () => {
-      await fillPool(6);
-      const away = await makeStaff(1, A, 'elsewhere', false);
-      await m.Attendance.create({ user: away[0]._id, branch: B, date: attendanceDate(), first_login_at: new Date(), last_login_at: new Date(), login_count: 1 });
-      expect((await make([staff[0], away[0]])).status).toBe(400);
-    });
-
-    it('an Excel upload and a hot campaign follow the same rule', async () => {
-      const away = await makeStaff(1, A, 'xl', false);
-      const sheet = await make([staff[0], away[0]], { count: undefined, leads: [{ mobile: '9700000001' }, { mobile: '9700000002' }] });
-      expect(sheet.status).toBe(400);
-      await fillHotPool(4, A, 0);
-      const hot = await make([staff[0], away[0]], { count: 4, lead_type: 'HOT' });
-      expect(hot.status).toBe(400);
-      expect(await m.HotLead.countDocuments({ branch: A })).toBe(4);
-    });
-
-    it('later rounds are not blocked: an absent person can still be chosen on purpose', async () => {
-      await fillPool(6);
-      const cid = (await make([staff[0], staff[1]])).body._id;
-      const away = await makeStaff(1, A, 'late', false);
-      await m.UserLead.updateMany({ campaign: cid }, { $set: { status: 'RINGING' } });
-      const r = await call('adminA', 'post', '/campaigns/' + cid + '/next-round', { staff: [String(staff[0]._id), String(away[0]._id)] });
-      expect(r.status).toBe(201);
     });
   });
 

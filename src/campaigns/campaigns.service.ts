@@ -181,22 +181,6 @@ export class CampaignsService implements OnModuleInit {
     return ids;
   }
 
-  /** The first round only goes to people who are logged in today. */
-  private async requireLoggedIn(branch: string, staff: string[]) {
-    const here = new Set(await this.attendance.loggedInUserIds(attendanceDate(), branch));
-    const away = staff.filter((id) => !here.has(id));
-    if (away.length === 0) return;
-    const people: any[] = await this.users
-      .find({ _id: { $in: away.map(oid) } })
-      .select('first_name last_name username')
-      .lean()
-      .exec();
-    const names = people.map((p) => p.username || `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim());
-    throw new BadRequestException(
-      `Not logged in today: ${names.join(', ')}. Leads can only be given to people who are logged in. Remove them and try again.`,
-    );
-  }
-
   /** Takes the leads out of the pool; a lead another admin took meanwhile is skipped. */
   private async claimFromPool(branch: string, input: CreateCampaignInput, type: LeadType) {
     const pool = this.poolOf(type);
@@ -316,7 +300,6 @@ export class CampaignsService implements OnModuleInit {
     const name = this.cleanName(input?.name);
     const staff = await this.cleanStaff(ctx.branch, input?.staff);
     const leadType = this.cleanLeadType(input?.lead_type);
-    await this.requireLoggedIn(ctx.branch, staff);
 
     let campaign: any;
     try {
