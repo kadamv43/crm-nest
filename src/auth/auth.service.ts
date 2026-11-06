@@ -1,6 +1,7 @@
 import {
   ForbiddenException,
   Injectable,
+  Logger,
   UnauthorizedException,
 } from '@nestjs/common';
 import { AuthPayloadDto } from './dto/auth.dto';
@@ -9,12 +10,17 @@ import { UsersService } from 'src/users/users.service';
 import * as bcrypt from 'bcrypt';
 import { Branch } from 'src/branches/branch.schema';
 import { Role } from './roles.enum';
+import { AttendanceService } from 'src/attendance/attendance.service';
+import { nextAutoLogout } from 'src/common/time.util';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private jwtService: JwtService,
     private usersService: UsersService,
+    private attendanceService: AttendanceService,
   ) {}
 
   async validateUser(username: string, password: string) {
@@ -49,8 +55,36 @@ export class AuthService {
       }
     }
 
+    // Everyone is logged out at 11 PM India time: the token simply stops
+    // being valid then. Logging in after 11 PM is allowed and lasts until the
+    // next 11 PM.
+    const now = new Date();
+    const expiresAt = nextAutoLogout(now);
+    const accessToken = this.jwtService.sign(payload, {
+      expiresIn: Math.max(
+        1,
+        Math.floor((expiresAt.getTime() - now.getTime()) / 1000),
+      ),
+    });
+
+    // Attendance: the first login of the 8 AM-to-8 AM day. Superadmin is not
+    // staff. A problem here must never stop someone from logging in.
+    if (user.role !== 'superadmin') {
+      try {
+        await this.attendanceService.recordLogin(
+          String(user._id),
+          String(payload.branch?._id ?? payload.branch),
+          now,
+        );
+      } catch (err) {
+        this.logger.error(`could not record attendance: ${err}`);
+      }
+    }
+
     return {
-      accessToken: this.jwtService.sign(payload),
+      accessToken,
+      expiresAt: expiresAt.toISOString(),
+      serverTime: now.toISOString(),
     };
   }
 

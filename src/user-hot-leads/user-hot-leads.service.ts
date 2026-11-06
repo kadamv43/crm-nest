@@ -12,11 +12,43 @@ import { types } from 'util';
 import { iif } from 'rxjs';
 import { UserHotLead } from './user-hot-lead.schema';
 
+import { ContactsService, RawLeadRow } from 'src/contacts/contacts.service';
+import { LeadActivityService } from 'src/contacts/lead-activity.service';
+import {
+  assignByMobiles,
+  assignMany,
+  AssignContext,
+} from 'src/contacts/assignment.helper';
+
 @Injectable()
 export class UserHotLeadsService {
   constructor(
     @InjectModel(UserHotLead.name) private readonly model: Model<UserHotLead>,
+    private readonly contacts: ContactsService,
+    private readonly activity: LeadActivityService,
   ) {}
+
+  /** Hands leads to staff: attaches contacts, saves the rows, logs ASSIGNED. */
+  async assign(ctx: AssignContext, items: Record<string, any>[]) {
+    return assignMany(this.model, this.contacts, this.activity, 'HOT_LEAD', ctx, items);
+  }
+
+  /** Pasted numbers handed to one staff member. */
+  async assignMobiles(
+    ctx: AssignContext,
+    assigneeId: string,
+    rows: RawLeadRow[],
+  ) {
+    return assignByMobiles(
+      this.model,
+      this.contacts,
+      this.activity,
+      'HOT_LEAD',
+      ctx,
+      assigneeId,
+      rows,
+    );
+  }
   async create(createDto: CreateUserLeadDto[]) {
     // const { mobile } = createDto;
     // const existingPatient = await this.model.findOne({ mobile }).exec();
@@ -588,8 +620,23 @@ export class UserHotLeadsService {
 
   async update(
     id: string,
-    updatePatientDto: UpdateUserLeadDto,
+    dto: UpdateUserLeadDto,
+    actorId?: string,
   ): Promise<UserHotLead> {
+    // the number and company are the lead's identity and never change here
+    const { mobile: _m, contact: _c, branch: _b, ...updatePatientDto } =
+      (dto ?? {}) as any;
+
+    // Working a lead sets a status; remember where it was so the change is on record.
+    const before =
+      updatePatientDto.status !== undefined
+        ? await this.model
+            .findById(id)
+            .select('status contact user branch')
+            .lean()
+            .exec()
+        : null;
+
     if (updatePatientDto.status == 'PAYMENT_DONE') {
     }
 
@@ -635,17 +682,19 @@ export class UserHotLeadsService {
     if (!existingPatient) {
       throw new NotFoundException(`Patient #${id} not found`);
     }
+
+    if (before) {
+      await this.activity.logStatusUpdate(
+        'HOT_LEAD',
+        before,
+        updatePatientDto.status,
+        actorId,
+      );
+    }
+
     return existingPatient;
   }
 
-  async insertData(data: any[]): Promise<any> {
-    try {
-      const insertedData = await this.model.insertMany(data);
-      return { message: 'Data inserted successfully', insertedData };
-    } catch (error) {
-      throw new Error(`Failed to insert data: ${error.message}`);
-    }
-  }
 
   async remove(id: string): Promise<UserHotLead> {
     const deletedPatient = await this.model.findByIdAndDelete(id).exec();
@@ -669,16 +718,6 @@ export class UserHotLeadsService {
       .exec();
   }
 
-  async importData(jsonData) {
-    for (const data of jsonData) {
-      const item = new this.model({
-        mobile: data['mobile'],
-        name: data['name'],
-        city: data['city'],
-      });
-      await item.save();
-    }
-  }
 
   async getCurrentMonthPaymentDoneByUserId(id) {
     const startOfMonth = new Date(

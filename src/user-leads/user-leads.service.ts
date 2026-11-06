@@ -13,15 +13,49 @@ import { ObjectId } from 'mongoose';
 import { types } from 'util';
 import { iif } from 'rxjs';
 import { LeadsService } from 'src/leads/leads.service';
+import { parseDayRange } from 'src/common/time.util';
+import { escapeRegex } from 'src/contacts/pool.helper';
 
 // Largest number of rows a single report export may return.
 export const MAX_REPORT_EXPORT_ROWS = 50000;
+
+import { ContactsService, RawLeadRow } from 'src/contacts/contacts.service';
+import { LeadActivityService } from 'src/contacts/lead-activity.service';
+import {
+  assignByMobiles,
+  assignMany,
+  AssignContext,
+} from 'src/contacts/assignment.helper';
 
 @Injectable()
 export class UserLeadsService {
   constructor(
     @InjectModel(UserLead.name) private readonly model: Model<UserLead>,
+    private readonly contacts: ContactsService,
+    private readonly activity: LeadActivityService,
   ) {}
+
+  /** Hands leads to staff: attaches contacts, saves the rows, logs ASSIGNED. */
+  async assign(ctx: AssignContext, items: Record<string, any>[]) {
+    return assignMany(this.model, this.contacts, this.activity, 'LEAD', ctx, items);
+  }
+
+  /** Pasted numbers handed to one staff member. */
+  async assignMobiles(
+    ctx: AssignContext,
+    assigneeId: string,
+    rows: RawLeadRow[],
+  ) {
+    return assignByMobiles(
+      this.model,
+      this.contacts,
+      this.activity,
+      'LEAD',
+      ctx,
+      assigneeId,
+      rows,
+    );
+  }
 
   async create(createDto: CreateUserLeadDto[]) {
     // const { mobile } = createDto;
@@ -820,12 +854,19 @@ export class UserLeadsService {
     page?: number;
     lead_type?: string;
     excel?: boolean;
+    campaign_report?: string | boolean;
+    campaign_id?: string;
+    campaign_round?: string | number;
+    campaign_name?: string;
+    branch?: string;
     user?: string | string[];
   }) {
     console.log('report', params);
     let matchStage: Record<string, any> = {};
     const { from, to, status, size = 10, page = 0, lead_type, excel } = params;
     const skip = page * size;
+    const campaignReport =
+      params.campaign_report === true || params.campaign_report === 'true';
 
     // Match by user if provided
     if (params.user) {
@@ -860,6 +901,41 @@ export class UserLeadsService {
     } else if (lead_type && lead_type == 'normal_lead') {
       matchStage['is_hot_lead'] = { $ne: true }; // also matches leads without the flag
     }
+
+    if (campaignReport) {
+      const campaignQuery: Record<string, any> = {};
+      if (params.branch && Types.ObjectId.isValid(params.branch)) {
+        campaignQuery.branch = new Types.ObjectId(params.branch);
+      }
+      const campaignName = String(params.campaign_name ?? '').trim();
+      if (campaignName) {
+        campaignQuery.name = {
+          $regex: escapeRegex(campaignName),
+          $options: 'i',
+        };
+      }
+      if (params.campaign_id) {
+        if (!Types.ObjectId.isValid(params.campaign_id)) {
+          throw new BadRequestException('Invalid campaign');
+        }
+        campaignQuery._id = new Types.ObjectId(params.campaign_id);
+      }
+      const campaigns = await this.model.db
+        .collection('campaigns')
+        .find(campaignQuery, { projection: { _id: 1 } })
+        .toArray();
+      matchStage['campaign'] = {
+        $in: campaigns.map((campaign: any) => campaign._id),
+      };
+
+      if (params.campaign_round !== undefined && params.campaign_round !== '') {
+        const campaignRound = Number(params.campaign_round);
+        if (!Number.isInteger(campaignRound) || campaignRound < 1) {
+          throw new BadRequestException('Invalid campaign round');
+        }
+        matchStage['campaign_round'] = campaignRound;
+      }
+    }
     console.log('query', matchStage);
 
     // Create the base aggregation pipeline with proper typing
@@ -874,6 +950,24 @@ export class UserLeadsService {
         },
       },
       { $unwind: { path: '$userDetails', preserveNullAndEmptyArrays: true } },
+      ...(campaignReport
+        ? [
+            {
+              $lookup: {
+                from: 'campaigns',
+                localField: 'campaign',
+                foreignField: '_id',
+                as: 'campaignDetails',
+              },
+            },
+            {
+              $unwind: {
+                path: '$campaignDetails',
+                preserveNullAndEmptyArrays: true,
+              },
+            },
+          ]
+        : []),
       {
         $project: {
           _id: 1,
@@ -891,9 +985,13 @@ export class UserLeadsService {
           is_hot_lead: 1,
           status: 1,
           created_at: 1,
+          ...(campaignReport ? { campaign_round: 1 } : {}),
+          ...(campaignReport ? { campaign_name: '$campaignDetails.name' } : {}),
         },
       },
-      { $sort: { created_at: -1 } }, // Changed "desc" to -1 for descending
+      // _id breaks ties: a whole round is handed out in the same instant, and a
+      // sort on time alone would shuffle those rows between pages.
+      { $sort: { created_at: -1, _id: -1 } },
     ];
 
     // If excel param is present, skip pagination
@@ -1043,13 +1141,57 @@ export class UserLeadsService {
     return { data: patients, total: totalRecords };
   }
 
-  async getAssigneddHotLeads(id: string, params) {
+  // Search box and date range of the "assigned" lists. The date range is when
+  // the lead was handed out (India-time days, both ends included).
+  private applyListFilters(query: Record<string, any>, params: any) {
+    if (params?.q && String(params.q).trim() !== '') {
+      const regex = new RegExp(escapeRegex(String(params.q).trim()), 'i');
+      query.$or = [{ mobile: regex }, { name: regex }, { city: regex }];
+    }
+    const range = parseDayRange(params?.from, params?.to);
+    if (range) {
+      query.created_at = { $gte: range.gte, $lte: range.lte };
+    }
+  }
+
+  // "Username" box of the assigned lists: only the leads held by people whose
+  // username contains the text, searched inside the same company as the list.
+  // Nobody matching means an empty list, never "everything".
+  private async applyUsernameFilter(
+    query: Record<string, any>,
+    params: any,
+    branch?: string,
+  ) {
+    const text = String(params?.username ?? '').trim().slice(0, 100);
+    if (!text) {
+      return;
+    }
+    const users = this.model.db.models['User'];
+    if (!users) {
+      throw new Error('The user list is not available');
+    }
+    const match: Record<string, any> = {
+      username: new RegExp(escapeRegex(text), 'i'),
+    };
+    if (branch) {
+      match.branch = new Types.ObjectId(branch);
+    }
+    const found = await users.find(match).select('_id').limit(1000).lean();
+    query.user = { $in: found.map((u: any) => u._id) };
+  }
+
+  async getAssigneddHotLeads(id: string, params, branch?: string) {
     const size = params.size;
     const skip = params.page * params.size;
 
     let query = {};
 
     query = { is_hot_lead: true, status: 'FRESH' };
+    if (branch) {
+      query['branch'] = new Types.ObjectId(branch);
+    }
+    this.applyListFilters(query, params);
+    await this.applyUsernameFilter(query, params, branch);
 
     const now = new Date();
 
@@ -1091,13 +1233,18 @@ export class UserLeadsService {
     return { data: patients, total: totalRecords };
   }
 
-  async getAssignedLeads(id: string, params) {
+  async getAssignedLeads(id: string, params, branch?: string) {
     const size = params.size;
     const skip = params.page * params.size;
 
     let query = {};
 
     query = { is_hot_lead: false, status: 'FRESH' };
+    if (branch) {
+      query['branch'] = new Types.ObjectId(branch);
+    }
+    this.applyListFilters(query, params);
+    await this.applyUsernameFilter(query, params, branch);
 
     const now = new Date();
 
@@ -1188,13 +1335,36 @@ export class UserLeadsService {
   async update(
     id: string,
     updatePatientDto: UpdateUserLeadDto,
+    actorId?: string,
   ): Promise<UserLead> {
     const updateFields: any = {};
+
+    // Working a lead sets a status; remember where it was so the change is on record.
+    const before =
+      updatePatientDto.status !== undefined
+        ? await this.model
+            .findById(id)
+            .select('status contact user branch')
+            .lean()
+            .exec()
+        : null;
 
     console.log(updatePatientDto);
     // ✅ Update top-level fields dynamically (excluding nested ones)
     Object.keys(updatePatientDto).forEach((key) => {
-      if (!['payment', 'free_trial', 'follow_up'].includes(key)) {
+      // the number and company are the lead's identity and never change here
+      if (
+        ![
+          'payment',
+          'free_trial',
+          'follow_up',
+          'mobile',
+          'contact',
+          'branch',
+          'campaign',
+          'campaign_round',
+        ].includes(key)
+      ) {
         updateFields[key] = updatePatientDto[key];
       }
     });
@@ -1253,6 +1423,15 @@ export class UserLeadsService {
       throw new NotFoundException(`Patient #${id} not found`);
     }
 
+    if (before) {
+      await this.activity.logStatusUpdate(
+        'LEAD',
+        before,
+        updatePatientDto.status,
+        actorId,
+      );
+    }
+
     return updatedUserLead;
   }
 
@@ -1307,14 +1486,6 @@ export class UserLeadsService {
     return existingPatient;
   }
 
-  async insertData(data: any[]): Promise<any> {
-    try {
-      const insertedData = await this.model.insertMany(data);
-      return { message: 'Data inserted successfully', insertedData };
-    } catch (error) {
-      throw new Error(`Failed to insert data: ${error.message}`);
-    }
-  }
 
   async remove(id: string): Promise<UserLead> {
     const deletedPatient = await this.model.findByIdAndDelete(id).exec();
@@ -1324,32 +1495,32 @@ export class UserLeadsService {
     return deletedPatient;
   }
 
-  async getLeadHistory(params: Record<string, any>) {
-    const page = parseInt(params.page);
-    const size = parseInt(params.size);
-    const skip = page * size;
+  /**
+   * Every time a number was handed out, newest first. Looks the number up as a
+   * contact (so +91 / spaces do not matter) and lists the calling rows that
+   * point at it. Staff of a company only see their own company's history.
+   */
+  async getLeadHistory(params: Record<string, any>, branch?: string) {
+    const page = parseInt(params.page, 10) || 0;
+    const size = parseInt(params.size, 10) || 10;
 
-    console.log('page', page);
-    console.log('size', size);
-
-    console.log(params);
-    if (params.mobile) {
-      const isValidMobile = /^\d{10}$/.test(params.mobile);
-      if (!isValidMobile) {
-        throw new BadRequestException('Invalid Mobile Number');
-      }
-    }
-
-    if (params.mobile == '') {
+    if (params.mobile == '' || params.mobile === undefined) {
       throw new BadRequestException('Please enter Mobile number');
     }
 
-    let query = { mobile: params.mobile };
+    // throws 'Invalid Mobile Number' for anything that is not a 10 digit mobile
+    const found = await this.contacts.findByMobile(branch, params.mobile);
+    if (found.length === 0) {
+      return { data: [], total: 0 };
+    }
 
-    let data = await this.model
+    const query = { contact: { $in: found.map((c) => c._id) } };
+
+    const data = await this.model
       .find(query)
+      .sort({ created_at: -1 })
       .populate('user')
-      .skip(skip)
+      .skip(page * size)
       .limit(size)
       .exec();
 
@@ -1371,16 +1542,6 @@ export class UserLeadsService {
       .exec();
   }
 
-  async importData(jsonData) {
-    for (const data of jsonData) {
-      const item = new this.model({
-        mobile: data['mobile'],
-        name: data['name'],
-        city: data['city'],
-      });
-      await item.save();
-    }
-  }
 
   async getCurrentMonthPaymentDoneByUserId(id) {
     const startOfMonth = new Date(

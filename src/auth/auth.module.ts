@@ -12,6 +12,7 @@ import { PatientGuard } from './guards/patient.guard';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { HttpModule } from '@nestjs/axios';
 import { OtpModule } from 'src/otp/otp.module';
+import { AttendanceModule } from 'src/attendance/attendance.module';
 
 @Module({
   imports: [
@@ -22,7 +23,8 @@ import { OtpModule } from 'src/otp/otp.module';
     }),
     UsersModule,
     OtpModule,
-    HttpModule
+    HttpModule,
+    AttendanceModule,
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy, PatientGuard],

@@ -1,6 +1,4 @@
-import { HttpService } from '@nestjs/axios';
 import {
-  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -12,68 +10,82 @@ import {
   Query,
   Req,
   UploadedFile,
+  UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { HotLeadsService } from './hot-leads.service';
 import { FileInterceptor } from '@nestjs/platform-express';
-import * as XLSX from 'xlsx';
+import { Request } from 'express';
+import { JwtAuthGuard } from 'src/auth/guards/jwt.guard';
+import { readSheetRows } from 'src/common/excel.util';
+import { requestContext, scopedBranch } from 'src/common/request-context';
+import { HotLeadsService } from './hot-leads.service';
 import { UpdateHotLeadDto } from './dto/update-hot-lead.dto';
 
+@UseGuards(JwtAuthGuard)
 @Controller('hot-leads')
 export class HotLeadsController {
   constructor(private readonly service: HotLeadsService) {}
 
+  // One hot lead from the form: mobile, name, city, investment.
   @Post()
-  async createBranch(@Body() body) {
-    return this.service.create(body);
+  async createBranch(@Body() body, @Req() req: Request) {
+    const ctx = requestContext(req);
+    return this.service.ingest(
+      { branch: ctx.branch, uploadedBy: ctx.userId },
+      [body ?? {}],
+    );
   }
 
-  @Get()
-  async findAll(@Query() query: Record<string, any>) {
-    return this.service.findAll(query);
-  }
-
-  @Get(':id')
-  async getBlogById(@Param('id') id: string) {
-    return this.service.getById(id);
-  }
-
-  @Put(':id')
-  async update(@Param('id') id: string, @Body() updateDto: UpdateHotLeadDto) {
-    return this.service.update(id, updateDto);
-  }
-
-  @Delete(':id')
-  async remove(@Param('id') id: string) {
-    return this.service.remove(id);
-  }
-
-  @Patch(':id')
-  updatePartial(@Param('id') id: string, @Body() updateDto: UpdateHotLeadDto) {
-    return this.service.update(id, updateDto);
-  }
-
+  // Excel upload with columns mobile, name, city, investment.
   @Post('import-excel')
   @UseInterceptors(FileInterceptor('file'))
-  async uploadExcel(@UploadedFile() file: Express.Multer.File) {
-    if (!file) {
-      throw new BadRequestException('File is required');
-    }
-    const workbook = XLSX.read(file.buffer, { type: 'buffer' });
-    const sheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[sheetName];
-    const jsonData = XLSX.utils.sheet_to_json(sheet);
-    console.log(jsonData);
-    return await this.service.insertData(jsonData);
+  async uploadExcel(
+    @UploadedFile() file: Express.Multer.File,
+    @Req() req: Request,
+  ) {
+    const ctx = requestContext(req);
+    return this.service.ingest(
+      { branch: ctx.branch, uploadedBy: ctx.userId },
+      readSheetRows(file),
+    );
   }
 
   @Post('delete-bulk')
   async deleteBulk(@Body() body, @Req() req: Request) {
-    const { leads, user } = body;
-    // let is_hot_lead = false;
+    const leadIds = (body?.leads ?? []).map((item) => item?._id);
+    return this.service.deleteByIds(leadIds, scopedBranch(req));
+  }
 
-    const leadIds = leads.map((item) => item?._id); // Ensures no undefined/null values
-    console.log(leadIds);
-    return this.service.deleteByIds(leadIds); // No need for await before return
+  @Get()
+  async findAll(@Query() query: Record<string, any>, @Req() req: Request) {
+    return this.service.findAll(query, scopedBranch(req, query?.branch));
+  }
+
+  @Get(':id')
+  async getBlogById(@Param('id') id: string, @Req() req: Request) {
+    return this.service.getById(id, scopedBranch(req));
+  }
+
+  @Put(':id')
+  async update(
+    @Param('id') id: string,
+    @Body() updateDto: UpdateHotLeadDto,
+    @Req() req: Request,
+  ) {
+    return this.service.update(id, updateDto, scopedBranch(req));
+  }
+
+  @Delete(':id')
+  async remove(@Param('id') id: string, @Req() req: Request) {
+    return this.service.remove(id, scopedBranch(req));
+  }
+
+  @Patch(':id')
+  updatePartial(
+    @Param('id') id: string,
+    @Body() updateDto: UpdateHotLeadDto,
+    @Req() req: Request,
+  ) {
+    return this.service.update(id, updateDto, scopedBranch(req));
   }
 }

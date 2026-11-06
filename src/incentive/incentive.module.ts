@@ -7,11 +7,13 @@ import { UserLeadsService } from 'src/user-leads/user-leads.service';
 import { SpotIncentiveService } from 'src/spot-incentive/spot-incentive.service';
 import { BranchesModule } from 'src/branches/branches.module';
 import { UserLeadsModule } from 'src/user-leads/user-leads.module';
+import { ContactsModule } from 'src/contacts/contacts.module';
 import { SpotIncentiveModule } from 'src/spot-incentive/spot-incentive.module';
 import { IncentiveController } from './incentive.controller';
 
 @Module({
   imports: [
+    ContactsModule,
     MongooseModule.forFeature([
       { name: Incentive.name, schema: IncentiveSchema },
     ]),

@@ -2,11 +2,19 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Schema as MongooseSchema } from 'mongoose';
 import { Branch } from 'src/branches/branch.schema';
 import { User } from 'src/users/user.schema';
+import { Contact } from 'src/contacts/contact.schema';
 
 export type UserLeadDocument = UserLead & Document;
 
 @Schema()
 export class UserLead {
+  // The person being called. The number is stored once, on the contact; the
+  // same contact can have many rows here (re-assigned, called again, repeat payment).
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Contact', required: true })
+  contact: Contact;
+
+  // Read-only copy of contact.mobile so lists, reports and search keep
+  // working without a join. Always written together with `contact`.
   @Prop({ required: true, trim: true })
   mobile: string;
 
@@ -107,6 +115,13 @@ export class UserLead {
     email_status: string;
   };
 
+  // Set when a campaign handed the row out, and in which round.
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Campaign', required: false })
+  campaign?: any;
+
+  @Prop({ required: false })
+  campaign_round?: number;
+
   @Prop({ default: Date.now })
   created_at: Date;
 
@@ -115,3 +130,8 @@ export class UserLead {
 }
 
 export const UserLeadSchema = SchemaFactory.createForClass(UserLead);
+
+UserLeadSchema.index({ campaign: 1, contact: 1, created_at: -1 });
+
+UserLeadSchema.index({ contact: 1, created_at: -1 });
+UserLeadSchema.index({ branch: 1, contact: 1 });

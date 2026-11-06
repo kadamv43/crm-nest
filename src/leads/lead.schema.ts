@@ -1,12 +1,27 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document } from 'mongoose';
+import { Document, Schema as MongooseSchema } from 'mongoose';
+import { Branch } from 'src/branches/branch.schema';
+import { Contact } from 'src/contacts/contact.schema';
+import { User } from 'src/users/user.schema';
 
 export type LeadDocument = Lead & Document;
 
 @Schema()
 export class Lead {
+  // The person this row is about. The number itself is stored once, on the contact.
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Contact', required: true })
+  contact: Contact;
+
+  // Read-only copy of contact.mobile so lists and search keep working
+  // without a join. Always written together with `contact`.
   @Prop({ required: true, trim: true })
   mobile: string;
+
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Branch', required: true })
+  branch: Branch;
+
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', required: false })
+  uploaded_by?: User;
 
   @Prop({ required: false, trim: true })
   name?: string;
@@ -22,3 +37,11 @@ export class Lead {
 }
 
 export const LeadSchema = SchemaFactory.createForClass(Lead);
+
+// A number waits in a company's pool only once. Rows from before contacts
+// existed have no contact and must not block the index.
+LeadSchema.index(
+  { branch: 1, contact: 1 },
+  { unique: true, partialFilterExpression: { contact: { $exists: true } } },
+);
+LeadSchema.index({ branch: 1, created_at: -1 });

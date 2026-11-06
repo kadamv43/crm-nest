@@ -27,7 +27,7 @@ describeDb('UserLeadsService.getReports', () => {
     conn = await mongoose.createConnection(uri).asPromise();
     leadModel = conn.model<UserLead>('UserLead', UserLeadSchema);
     userModel = conn.model<User>('User', UserSchema);
-    service = new UserLeadsService(leadModel as any);
+    service = new UserLeadsService(leadModel as any, {} as any, {} as any);
   });
 
   afterAll(async () => {

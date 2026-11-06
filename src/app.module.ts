@@ -29,10 +29,16 @@ import { DayOfferModule } from './day-offer/day-offer.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { IncentiveModule } from './incentive/incentive.module';
 import { UserHotLeadsModule } from './user-hot-leads/user-hot-leads.module';
+import { ContactsModule } from './contacts/contacts.module';
+import { AttendanceModule } from './attendance/attendance.module';
+import { ScheduleModule } from '@nestjs/schedule';
+import { ReportMailModule } from './report-mail/report-mail.module';
+import { CampaignsModule } from './campaigns/campaigns.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot(),
+    ScheduleModule.forRoot(),
     MongooseModule.forRoot(process.env.DB),
     AuthModule,
     UsersModule,
@@ -57,6 +63,10 @@ import { UserHotLeadsModule } from './user-hot-leads/user-hot-leads.module';
     DashboardModule,
     IncentiveModule,
     UserHotLeadsModule,
+    ContactsModule,
+    AttendanceModule,
+    ReportMailModule,
+    CampaignsModule,
   ],
   controllers: [AppController, UploadsController],
   providers: [AppService, PdfService, FileUploadService],
